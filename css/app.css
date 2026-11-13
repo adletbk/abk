@@ -187,6 +187,9 @@ svg.icon { display: block; flex: none; }
   font-size: 16px;
 }
 .search input::placeholder { color: var(--text-2); }
+/* Своя кнопка закрытия уже есть: системный крестик поля поиска прячем. */
+.search input { -webkit-appearance: none; appearance: none; }
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; display: none; }
 
 .hero { padding: 20px 0 16px; text-align: center; }
 .hero-month {
