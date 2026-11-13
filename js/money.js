@@ -17,15 +17,18 @@ export function currencySymbol(currency) {
   return CURRENCIES[currency]?.symbol ?? currency;
 }
 
-/** 10770000 → «107 700 ₸». Дробная часть показывается, только если она не нулевая. */
-export function formatMoney(minor, currency = DEFAULT_CURRENCY, opts = {}) {
+/** 52000000 → «520 000»: модуль суммы без знака валюты. Дробная часть — только если не ноль. */
+export function formatAmount(minor) {
   const abs = Math.abs(Math.trunc(minor));
-  const whole = Math.floor(abs / 100);
   const frac = abs % 100;
-  let text = String(whole).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
-  if (frac) text += ',' + String(frac).padStart(2, '0');
+  const text = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, NBSP);
+  return frac ? text + ',' + String(frac).padStart(2, '0') : text;
+}
+
+/** 10770000 → «107 700 ₸». */
+export function formatMoney(minor, currency = DEFAULT_CURRENCY, opts = {}) {
   const sign = minor < 0 ? MINUS : opts.sign && minor > 0 ? '+' : '';
-  return sign + text + NBSP + currencySymbol(currency);
+  return sign + formatAmount(minor) + NBSP + currencySymbol(currency);
 }
 
 /** Текст на экране ввода суммы с разделителями тысяч: «107700,5» → «107 700,5». */
@@ -40,6 +43,10 @@ export function formatKeypadText(text) {
 export function keypadReduce(text, key) {
   if (key === 'back') return text.slice(0, -1);
   if (key === ',') return text.includes(',') ? text : (text === '' ? '0' : text) + ',';
+  if (key === '000') {
+    const blocked = text === '' || text === '0' || text.includes(',') || text.length + 3 > MAX_WHOLE_DIGITS;
+    return blocked ? text : text + '000';
+  }
   if (!/^\d$/.test(key)) return text;
   const [whole, frac] = text.split(',');
   if (frac !== undefined) return frac.length >= 2 ? text : text + key;

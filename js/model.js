@@ -59,10 +59,10 @@ export function validateTransaction(tx) {
 }
 
 export const SOURCE_LABELS = {
-  manual: 'вручную',
+  manual: 'Вручную',
   applepay: 'Apple Pay',
-  notification: 'уведомление банка',
-  import: 'импорт',
+  notification: 'Уведомление банка',
+  import: 'Импорт выписки',
 };
 
 export const TYPE_LABELS = { expense: 'Расход', income: 'Доход', transfer: 'Перевод' };
@@ -73,14 +73,32 @@ const MONTHS_GEN = ['января', 'февраля', 'марта', 'апрел�
   'сентября', 'октября', 'ноября', 'декабря'];
 const WEEKDAYS = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
 
-/** «Сегодня», «Вчера» или «3 ноября, вт» (с годом, если он не текущий). */
-export function dayTitle(day, today) {
-  if (day === today) return 'Сегодня';
-  if (day === shiftDay(today, -1)) return 'Вчера';
+const capitalize = (s) => s[0].toUpperCase() + s.slice(1);
+
+function relativeDay(day, today) {
+  return day === today ? 'Сегодня' : day === shiftDay(today, -1) ? 'Вчера' : null;
+}
+function dateText(day, today) {
   const [y, m, d] = day.split('-').map(Number);
-  const weekday = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
-  const year = day.slice(0, 4) === today.slice(0, 4) ? '' : ` ${y}`;
-  return `${d} ${MONTHS_GEN[m - 1]}${year}, ${weekday}`;
+  return `${d} ${MONTHS_GEN[m - 1]}${day.slice(0, 4) === today.slice(0, 4) ? '' : ` ${y}`}`;
+}
+
+/** Заголовок дня в списке: «Пт, 13 ноября · Сегодня», «Вт, 3 ноября». */
+export function dayTitle(day, today) {
+  const [y, m, d] = day.split('-').map(Number);
+  const weekday = capitalize(WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]);
+  const relative = relativeDay(day, today);
+  return `${weekday}, ${dateText(day, today)}${relative ? ` · ${relative}` : ''}`;
+}
+
+/** Короткая подпись дня для чипа даты: «Сегодня», «Вчера», «3 ноября». */
+export function dayShort(day, today) {
+  return relativeDay(day, today) ?? dateText(day, today);
+}
+
+/** Подпись периода: «Этот месяц», «Октябрь», «Декабрь 2025». */
+export function periodTitle(month, today) {
+  return month === today.slice(0, 7) ? 'Этот месяц' : capitalize(monthTitle(month, today));
 }
 
 /** «ноябрь» (с годом, если он не текущий). */

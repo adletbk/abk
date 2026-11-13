@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   localIso, dayKey, monthKey, shiftMonth, newTransaction, validateTransaction,
-  dayTitle, monthTitle, SOURCE_LABELS,
+  dayTitle, dayShort, monthTitle, periodTitle, SOURCE_LABELS,
 } from '../js/model.js';
 
 test('localIso: локальное время без пояса', () => {
@@ -52,11 +52,22 @@ test('validateTransaction: перевод', () => {
 });
 
 test('dayTitle', () => {
-  assert.equal(dayTitle('2026-11-13', '2026-11-13'), 'Сегодня');
-  assert.equal(dayTitle('2026-11-12', '2026-11-13'), 'Вчера');
-  assert.equal(dayTitle('2026-11-03', '2026-11-13'), '3 ноября, вт');
-  assert.equal(dayTitle('2026-10-31', '2026-11-01'), 'Вчера');
-  assert.equal(dayTitle('2025-12-31', '2026-11-13'), '31 декабря 2025, ср');
+  assert.equal(dayTitle('2026-11-13', '2026-11-13'), 'Пт, 13 ноября · Сегодня');
+  assert.equal(dayTitle('2026-11-12', '2026-11-13'), 'Чт, 12 ноября · Вчера');
+  assert.equal(dayTitle('2026-11-03', '2026-11-13'), 'Вт, 3 ноября');
+  assert.equal(dayTitle('2026-10-31', '2026-11-01'), 'Сб, 31 октября · Вчера');
+  assert.equal(dayTitle('2025-12-31', '2026-11-13'), 'Ср, 31 декабря 2025');
+});
+test('dayShort', () => {
+  assert.equal(dayShort('2026-11-13', '2026-11-13'), 'Сегодня');
+  assert.equal(dayShort('2026-11-12', '2026-11-13'), 'Вчера');
+  assert.equal(dayShort('2026-11-03', '2026-11-13'), '3 ноября');
+  assert.equal(dayShort('2025-12-31', '2026-11-13'), '31 декабря 2025');
+});
+test('periodTitle', () => {
+  assert.equal(periodTitle('2026-11', '2026-11-13'), 'Этот месяц');
+  assert.equal(periodTitle('2026-10', '2026-11-13'), 'Октябрь');
+  assert.equal(periodTitle('2025-12', '2026-11-13'), 'Декабрь 2025');
 });
 test('monthTitle', () => {
   assert.equal(monthTitle('2026-11', '2026-11-13'), 'ноябрь');
@@ -64,6 +75,6 @@ test('monthTitle', () => {
 });
 test('SOURCE_LABELS', () => {
   assert.deepEqual(SOURCE_LABELS, {
-    manual: 'вручную', applepay: 'Apple Pay', notification: 'уведомление банка', import: 'импорт',
+    manual: 'Вручную', applepay: 'Apple Pay', notification: 'Уведомление банка', import: 'Импорт выписки',
   });
 });

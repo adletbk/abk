@@ -2,8 +2,8 @@
 import { h, clear, toast } from './dom.js';
 import { icon } from '../icons.js';
 import { pickSheet, confirmSheet } from './sheet.js';
-import { formatMoney } from '../money.js';
-import { SOURCE_LABELS, dayTitle, monthTitle, shiftMonth, todayKey } from '../model.js';
+import { formatAmount, formatMoney } from '../money.js';
+import { SOURCE_LABELS, dayTitle, monthTitle, periodTitle, shiftMonth, todayKey } from '../model.js';
 import { monthSummary, groupByDay, accountBalances, totalBalance } from '../selectors.js';
 import { clearDemo } from '../seed.js';
 
@@ -22,20 +22,21 @@ export async function renderHome(root, ctx) {
   if (state.accountId && !accounts.some((a) => a.id === state.accountId)) state.accountId = null;
   const account = state.accountId ? accountsById.get(state.accountId) : null;
   const summary = monthSummary(txs, state.month, { accountId: state.accountId });
-  const month = monthTitle(state.month, today);
 
   // --- шапка ---
-  const chip = h('button', { type: 'button', class: 'chip', onClick: pickAccount },
-    h('span', { class: 'chip-label', text: account ? account.name : 'Все счета' }),
-    h('span', {
-      class: 'chip-value',
-      text: account ? formatMoney(balances.get(account.id), account.currency) : formatMoney(totalBalance(accounts, txs)),
-    }));
+  const chip = h('button', { type: 'button', class: 'acct', onClick: pickAccount },
+    h('span', { class: 'acct-icon' }, icon(account?.icon || 'wallet', 18)),
+    h('span', { class: 'acct-text' },
+      h('span', { class: 'acct-name', text: account ? account.name : 'Все счета' }),
+      h('span', {
+        class: 'acct-balance',
+        text: account ? formatMoney(balances.get(account.id), account.currency) : formatMoney(totalBalance(accounts, txs)),
+      })));
   const topbar = h('header', { class: 'topbar' },
     chip,
     h('span', { class: 'spacer' }),
     h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Поиск', onClick: toggleSearch }, icon('search')),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Аналитика', onClick: () => toast('Аналитика появится в M2') }, icon('chart')),
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Аналитика', onClick: () => toast('Аналитика появится в M2') }, icon('pie')),
     h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Настройки', onClick: () => toast('Настройки появятся в M2') }, icon('settings')));
 
   async function pickAccount() {
@@ -45,7 +46,7 @@ export async function renderHome(root, ctx) {
       items: [
         { value: null, label: 'Все счета', icon: 'layers', right: formatMoney(totalBalance(accounts, txs)) },
         ...accounts.map((a) => ({
-          value: a.id, label: a.name, icon: a.icon || 'card', right: formatMoney(balances.get(a.id), a.currency),
+          value: a.id, label: a.name, icon: a.icon || 'wallet', right: formatMoney(balances.get(a.id), a.currency),
         })),
       ],
     });
@@ -54,7 +55,7 @@ export async function renderHome(root, ctx) {
 
   // --- поиск ---
   const searchInput = h('input', {
-    type: 'search', placeholder: 'Заметка или категория', value: state.query,
+    type: 'search', placeholder: 'Заметка, категория или счёт', value: state.query,
     autocomplete: 'off', autocapitalize: 'off', enterkeyhint: 'search', 'aria-label': 'Поиск по операциям',
     onInput: () => { state.query = searchInput.value; fillList(); },
   });
@@ -70,18 +71,20 @@ export async function renderHome(root, ctx) {
   // --- баланс месяца ---
   const balanceText = formatMoney(summary.balance);
   const hero = h('section', { class: 'hero' },
-    h('div', { class: 'hero-month' },
-      h('button', { type: 'button', class: 'icon-btn plain', 'aria-label': 'Предыдущий месяц', onClick: () => changeMonth(-1) }, icon('chevron-left', 20)),
-      h('span', { class: 'title', text: `Баланс за ${month}` }),
-      h('button', { type: 'button', class: 'icon-btn plain', 'aria-label': 'Следующий месяц', onClick: () => changeMonth(1) }, icon('chevron-right', 20))),
-    h('div', { class: 'hero-amount' + (balanceText.length > 12 ? ' long' : ''), text: balanceText }),
-    h('div', { class: 'hero-split' },
-      h('div', { class: 'tile' },
-        h('div', { class: 'label' }, h('span', { class: 'dot income' }), 'Доход'),
-        h('div', { class: 'value income', text: formatMoney(summary.income) })),
-      h('div', { class: 'tile' },
-        h('div', { class: 'label' }, h('span', { class: 'dot expense' }), 'Расход'),
-        h('div', { class: 'value expense', text: formatMoney(summary.expense) }))));
+    h('div', { class: 'hero-period' },
+      h('span', { text: 'Баланс за' }),
+      h('div', { class: 'period' },
+        h('button', { type: 'button', 'aria-label': 'Предыдущий месяц', onClick: () => changeMonth(-1) }, icon('chevron-left', 18)),
+        h('span', { class: 'period-title', text: periodTitle(state.month, today) }),
+        h('button', { type: 'button', 'aria-label': 'Следующий месяц', onClick: () => changeMonth(1) }, icon('chevron-right', 18)))),
+    h('div', { class: 'hero-amount' + (balanceText.length > 11 ? ' long' : ''), text: balanceText }),
+    h('div', { class: 'hero-flow' },
+      h('span', { class: 'income', 'aria-label': `Доход ${formatMoney(summary.income)}` },
+        icon('arrow-in', 18), h('span', { text: formatAmount(summary.income) })),
+      h('span', { class: 'expense', 'aria-label': `Расход ${formatMoney(summary.expense)}` },
+        icon('arrow-out', 18), h('span', { text: formatAmount(summary.expense) }))),
+    h('button', { type: 'button', class: 'pill-btn', onClick: () => toast('Инсайты появятся в M2') },
+      icon('sparkles', 20), 'Инсайты'));
 
   function changeMonth(delta) {
     state.month = shiftMonth(state.month, delta);
@@ -96,7 +99,7 @@ export async function renderHome(root, ctx) {
       onClick: async () => {
         const yes = await confirmSheet({
           title: 'Удалить тестовые данные?',
-          text: 'Тестовые операции исчезнут. Счета, категории и операции, которые вы добавили сами, останутся.',
+          text: 'Тестовые операции исчезнут. Счета, категории и операции, которые вы добавили или изменили сами, останутся.',
           confirmLabel: 'Удалить', danger: true,
         });
         if (yes) { await clearDemo(db); ctx.render(); }
@@ -105,37 +108,45 @@ export async function renderHome(root, ctx) {
 
   // --- список по дням ---
   const list = h('section', { class: 'days' });
+  const accountName = (id) => accountsById.get(id)?.name ?? 'Счёт';
 
   function row(tx) {
     const isTransfer = tx.type === 'transfer';
     const category = categoriesById.get(tx.category_id);
-    const name = (id) => accountsById.get(id)?.name ?? 'Счёт';
-    const title = isTransfer ? `${name(tx.account_id)} → ${name(tx.to_account_id)}` : category?.name ?? 'Без категории';
-    const sub = [tx.note, SOURCE_LABELS[tx.source] ?? tx.source].filter(Boolean).join(' · ');
+    const fallback = isTransfer ? 'Перевод' : category?.name ?? 'Без категории';
+    const where = isTransfer ? `${accountName(tx.account_id)} → ${accountName(tx.to_account_id)}` : accountName(tx.account_id);
     const amount = tx.type === 'income' ? formatMoney(tx.amount, tx.currency, { sign: true })
       : isTransfer ? formatMoney(tx.amount, tx.currency) : formatMoney(-tx.amount, tx.currency);
     return h('button', { type: 'button', class: 'row', onClick: () => ctx.navigate(`#/add/${tx.id}`) },
       h('span', { class: 'cat-badge', style: { '--c': isTransfer ? TRANSFER_COLOR : category?.color ?? '#A3A3A3' } },
         icon(isTransfer ? 'transfer' : category?.icon ?? 'dots', 22)),
       h('span', { class: 'row-main' },
-        h('div', { class: 'row-title', text: title }),
-        h('div', { class: 'row-sub', text: sub })),
+        h('span', { class: 'row-title', text: tx.note || fallback }),
+        h('span', { class: 'row-sub', text: `${where} · ${SOURCE_LABELS[tx.source] ?? tx.source}` })),
       h('span', { class: 'row-amount' + (tx.type === 'income' ? ' income' : isTransfer ? ' muted' : ''), text: amount }));
   }
 
   function fillList() {
     clear(list);
-    const days = groupByDay(txs, state.month, { accountId: state.accountId, query: state.query, categoriesById });
+    // Поиск идёт по заметке, категории и счёту: подставляем их в одно поле для выборки.
+    const searchable = state.query.trim()
+      ? txs.map((tx) => ({ ...tx, note: `${tx.note ?? ''}\n${accountName(tx.account_id)}` }))
+      : txs;
+    const byId = new Map(txs.map((tx) => [tx.id, tx]));
+    const days = groupByDay(searchable, state.month, { accountId: state.accountId, query: state.query, categoriesById });
     if (days.length === 0) {
-      list.append(h('p', { class: 'empty', text: state.query.trim() ? 'Ничего не найдено' : `Нет операций за ${month}` }));
+      list.append(h('p', {
+        class: 'empty',
+        text: state.query.trim() ? 'Ничего не найдено' : `Нет операций за ${monthTitle(state.month, today)}`,
+      }));
       return;
     }
     for (const group of days) {
       list.append(h('div', { class: 'day' },
         h('div', { class: 'day-head' },
           h('span', { text: dayTitle(group.day, today) }),
-          h('span', { class: 'num', text: formatMoney(group.total, 'KZT', { sign: true }) })),
-        h('div', { class: 'day-card' }, group.items.map(row))));
+          h('span', { class: 'num' + (group.total > 0 ? ' income' : ''), text: formatMoney(group.total, 'KZT', { sign: true }) })),
+        group.items.map((tx) => row(byId.get(tx.id)))));
     }
   }
   fillList();

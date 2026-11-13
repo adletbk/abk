@@ -5,23 +5,23 @@ const GREEN = '#10B981', ORANGE = '#FB923C', BLUE = '#60A5FA', PURPLE = '#A78BFA
   RED = '#F87171', YELLOW = '#FBBF24', GRAY = '#A3A3A3';
 
 const CATEGORIES = [
-  ['cat-food', 'Продукты', 'cart', GREEN, 'expense'],
-  ['cat-cafe', 'Кафе', 'cup', ORANGE, 'expense'],
+  ['cat-food', 'Еда', 'cart', GREEN, 'expense'],
   ['cat-transport', 'Транспорт', 'bus', BLUE, 'expense'],
-  ['cat-home', 'Дом', 'home', PURPLE, 'expense'],
+  ['cat-home', 'Дом', 'home', ORANGE, 'expense'],
+  ['cat-health', 'Здоровье', 'pulse', RED, 'expense'],
+  ['cat-cafe', 'Кафе', 'cup', YELLOW, 'expense'],
   ['cat-phone', 'Связь', 'phone', BLUE, 'expense'],
-  ['cat-health', 'Здоровье', 'heart', RED, 'expense'],
   ['cat-clothes', 'Одежда', 'shirt', PURPLE, 'expense'],
-  ['cat-fun', 'Развлечения', 'play', YELLOW, 'expense'],
+  ['cat-fun', 'Развлечения', 'play', PURPLE, 'expense'],
   ['cat-gifts', 'Подарки', 'gift', RED, 'expense'],
   ['cat-other', 'Другое', 'dots', GRAY, 'expense'],
-  ['cat-salary', 'Зарплата', 'wallet', GREEN, 'income'],
-  ['cat-side', 'Подработка', 'briefcase', BLUE, 'income'],
+  ['cat-salary', 'Зарплата', 'briefcase', YELLOW, 'income'],
+  ['cat-side', 'Подработка', 'wallet', BLUE, 'income'],
   ['cat-other-income', 'Другое', 'dots', GRAY, 'income'],
 ];
 
 const ACCOUNTS = [
-  ['acc-card', 'Карта', 'card'],
+  ['acc-card', 'Карта', 'wallet'],
   ['acc-cash', 'Наличные', 'cash'],
 ];
 

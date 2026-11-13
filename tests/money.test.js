@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatMoney, keypadReduce, parseAmount, amountToText } from '../js/money.js';
+import { formatMoney, formatAmount, keypadReduce, parseAmount, amountToText } from '../js/money.js';
 
 const NB = ' ';
 
@@ -19,6 +19,21 @@ test('formatMoney: знак', () => {
 });
 test('formatMoney: другая валюта', () => {
   assert.equal(formatMoney(1999, 'USD'), `19,99${NB}$`);
+});
+
+test('formatAmount: число без знака валюты', () => {
+  assert.equal(formatAmount(52000000), `520${NB}000`);
+  assert.equal(formatAmount(41230050), `412${NB}300,50`);
+  assert.equal(formatAmount(0), '0');
+});
+
+test('keypadReduce: клавиша 000', () => {
+  assert.equal(keypadReduce('45', '000'), '45000');
+  assert.equal(keypadReduce('', '000'), '');
+  assert.equal(keypadReduce('0', '000'), '0');
+  assert.equal(keypadReduce('1,5', '000'), '1,5');
+  assert.equal(keypadReduce('1234567890', '000'), '1234567890'); // не больше 12 цифр
+  assert.equal(keypadReduce('123456789', '000'), '123456789000');
 });
 
 test('keypadReduce: без ведущих нулей', () => {
