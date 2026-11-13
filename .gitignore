@@ -1,0 +1,5 @@
+node_modules/
+samples/
+.superpowers/
+*.local.*
+.DS_Store
