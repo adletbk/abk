@@ -166,7 +166,8 @@ export async function renderAdd(root, ctx, { id = null } = {}) {
       note: form.note.trim(),
       date: form.day + time,
     };
-    const tx = existing ? { ...existing, ...fields, updated_at: Date.now() } : newTransaction(fields);
+    // Правка делает тестовую операцию своей: снимаем пометку demo, чтобы её не стёрла очистка.
+    const tx = existing ? { ...existing, ...fields, demo: false, updated_at: Date.now() } : newTransaction(fields);
     const errors = validateTransaction(tx);
     if (errors.length) { toast(errors[0]); return; }
     saving = true;
