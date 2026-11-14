@@ -84,7 +84,8 @@ test('первая синхронизация: справочники и сво�
   const result = await syncNow(db, transport, T0 + 5000);
   assert.deepEqual(result.pushed, { categories: 13, accounts: 2, templates: 0, transactions: 2 });
 
-  const rows = gas.sheet('transactions').objects();
+  // порядок строк зависит от случайных id, поэтому сортируем
+  const rows = gas.sheet('transactions').objects().sort((x, y) => y['Сумма'] - x['Сумма']);
   assert.deepEqual(rows.map((r) => [r['Заметка'], r['Сумма'], r['Категория'], r['Счёт'], r['Источник']]),
     [['Магазин', 8450.5, 'Еда', 'Карта', 'Вручную'], ['Кофе', 1500, 'Кафе', 'Карта', 'Вручную']]);
   assert.equal(gas.sheet('categories').objects().length, 13);

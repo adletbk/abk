@@ -748,3 +748,24 @@ svg.icon { display: block; flex: none; }
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* ---------- Синхронизация ---------- */
+
+.dock-sync { position: relative; }
+.dock-sync.failed::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 2px solid var(--card);
+}
+.syncing .dock-sync svg { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .syncing .dock-sync svg { animation: none; opacity: 0.5; }
+}
+.list .item-label { white-space: normal; overflow-wrap: anywhere; }

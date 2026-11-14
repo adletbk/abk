@@ -8,6 +8,7 @@ import { renderAdd } from './ui/add.js';
 import { renderAnalytics } from './ui/analytics.js';
 import { renderSettings, renderCategories, renderAccounts, renderTemplates } from './ui/settings.js';
 import { renderBackup } from './ui/backup.js';
+import { renderSync, renderInbox, scheduleSync } from './ui/sync.js';
 
 const SCREENS = {
   analytics: renderAnalytics,
@@ -16,6 +17,8 @@ const SCREENS = {
   accounts: renderAccounts,
   templates: renderTemplates,
   backup: renderBackup,
+  sync: renderSync,
+  inbox: renderInbox,
 };
 
 const root = document.getElementById('app');
@@ -41,7 +44,8 @@ async function main() {
     back() {
       if (depth > 0) { depth--; history.back(); } else { location.replace('#/'); }
     },
-    async render() {
+    /** auto: false — не планировать фоновую синхронизацию (рендер вызван самой синхронизацией). */
+    async render({ auto = true } = {}) {
       const seq = ++renderSeq;
       const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?t=([\w-]+))?$/);
       const screen = SCREENS[location.hash.slice(2)];
@@ -51,11 +55,17 @@ async function main() {
       else await renderHome(target, ctx);
       if (seq !== renderSeq) return; // пришёл более новый рендер
       clear(root).append(...target.childNodes);
+      if (auto) scheduleSync(ctx); // после любого изменения экраны перерисовываются
     },
   };
 
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); ctx.render(); });
   await ctx.render();
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') scheduleSync(ctx);
+  });
+  window.addEventListener('online', () => scheduleSync(ctx));
 
   requestPersistence(db);
   registerServiceWorker();
@@ -75,6 +85,9 @@ async function requestPersistence(db) {
 
 async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
+  // При локальной разработке кеш мешает видеть свежие файлы. Проверить офлайн-режим: откройте /?sw
+  const local = ['localhost', '127.0.0.1'].includes(location.hostname);
+  if (local && !new URLSearchParams(location.search).has('sw')) return;
   try {
     const hadController = Boolean(navigator.serviceWorker.controller);
     const registration = await navigator.serviceWorker.register('./sw.js');

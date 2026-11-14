@@ -7,13 +7,15 @@ import { formatAmount, formatMoney } from '../money.js';
 import { SOURCE_LABELS, dayTitle, monthTitle, periodTitle, shiftMonth, todayKey } from '../model.js';
 import { monthSummary, groupByDay, accountBalances, totalBalance } from '../selectors.js';
 import { clearDemo } from '../seed.js';
+import { runSync } from './sync.js';
 
 const TRANSFER_COLOR = '#60A5FA';
 
 export async function renderHome(root, ctx) {
   const { db, state } = ctx;
-  const [txs, categories, allAccounts, demo] = await Promise.all([
+  const [txs, categories, allAccounts, demo, syncError] = await Promise.all([
     db.getAll('transactions'), db.getAll('categories'), db.getAll('accounts'), db.getSetting('demo', false),
+    db.getSetting('sync_error', null),
   ]);
   const today = todayKey();
   const categoriesById = new Map(categories.map((c) => [c.id, c]));
@@ -193,7 +195,11 @@ export async function renderHome(root, ctx) {
   const dock = h('nav', { class: 'dock', 'aria-label': 'Действия' },
     h('button', { type: 'button', 'aria-label': 'Шаблоны', onClick: pickTemplate }, icon('bolt')),
     h('button', { type: 'button', class: 'dock-add', 'aria-label': 'Добавить операцию', onClick: () => ctx.navigate('#/add') }, icon('plus', 28)),
-    h('button', { type: 'button', 'aria-label': 'Синхронизация', onClick: () => toast('Синхронизация появится в M3') }, icon('sync')));
+    h('button', {
+      type: 'button', class: 'dock-sync' + (syncError ? ' failed' : ''),
+      'aria-label': syncError ? `Синхронизация: ошибка. ${syncError.message}` : 'Синхронизация',
+      onClick: () => runSync(ctx),
+    }, icon('sync')));
 
   clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, list, dock));
 }

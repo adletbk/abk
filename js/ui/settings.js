@@ -16,6 +16,11 @@ export async function renderSettings(root, ctx) {
   let persisted = null;
   try { persisted = await navigator.storage?.persisted?.(); } catch { /* недоступно */ }
   const lastBackup = await db.getSetting('last_backup_at', null);
+  const [syncUrl, syncAt, syncError, inbox] = await Promise.all([
+    db.getSetting('sync_url', ''), db.getSetting('sync_last_at', null), db.getSetting('sync_error', null), db.getAll('inbox'),
+  ]);
+  const syncStatus = !syncUrl ? 'Не настроена' : syncError ? `Ошибка: ${syncError.message}`
+    : syncAt ? `Последняя: ${new Date(syncAt).toLocaleString('ru-RU')}` : 'Подключена';
 
   clear(root).append(h('div', { class: 'screen' },
     screenHeader(ctx, 'Настройки'),
@@ -29,9 +34,15 @@ export async function renderSettings(root, ctx) {
         sub: lastBackup ? `Последний бэкап: ${new Date(lastBackup).toLocaleDateString('ru-RU')}` : 'Бэкап ещё не делался',
         onClick: () => ctx.navigate('#/backup'),
       })),
+    h('div', { class: 'group-title', text: 'Облако' }),
+    h('div', { class: 'list' },
+      listItem({ iconName: 'sync', color: '#10B981', label: 'Синхронизация', sub: syncStatus, onClick: () => ctx.navigate('#/sync') }),
+      listItem({
+        iconName: 'phone', color: '#A78BFA', label: 'Входящие', sub: 'Записи от Команд iOS',
+        tag: inbox.length ? String(inbox.length) : null, onClick: () => ctx.navigate('#/inbox'),
+      })),
     h('div', { class: 'group-title', text: 'Появится позже' }),
     h('div', { class: 'list' },
-      listItem({ iconName: 'sync', label: 'Синхронизация с Google Таблицей', tag: 'M3' }),
       listItem({ iconName: 'table', label: 'Правила разбора уведомлений', tag: 'M4' }),
       listItem({ iconName: 'upload', label: 'Импорт xlsx и csv', tag: 'M5' })),
     h('div', { class: 'group-title', text: 'Об этом устройстве' }),
