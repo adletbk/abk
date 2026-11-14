@@ -91,7 +91,8 @@ export async function renderSync(root, ctx) {
     autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', inputmode: 'url', 'aria-label': 'Адрес веб-приложения',
   });
   const tokenInput = h('input', {
-    class: 'field-input', type: 'password', value: token, placeholder: 'Токен из журнала setup()',
+    // Обычное текстовое поле: страница не должна быть похожа на форму входа.
+    class: 'field-input', type: 'text', value: token, placeholder: 'Токен из журнала setup()',
     autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Токен',
   });
 

@@ -21,3 +21,11 @@ test('в оболочке нет inline-скриптов и inline-стилей'
   assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i);
   assert.doesNotMatch(html, /<style\b|\sstyle=/i);
 });
+
+test('в коде экранов нет полей типа password', async () => {
+  const { readdirSync } = await import('node:fs');
+  const dir = fileURLToPath(new URL('../js/ui/', import.meta.url));
+  for (const name of readdirSync(dir)) {
+    assert.doesNotMatch(readFileSync(dir + name, 'utf8'), /type:s*'password'|type="password"/, name);
+  }
+});
