@@ -94,6 +94,25 @@ function wrap(idb) {
       s.put(encode(store, { ...decode(store, value), deleted: true, deleted_at: now, updated_at: now }));
     }),
 
+    /** Заменяет содержимое нескольких хранилищ одной транзакцией (восстановление из бэкапа). */
+    replaceAll: (data) => new Promise((resolve, reject) => {
+      const names = Object.keys(data);
+      const tx = idb.transaction(names, 'readwrite');
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Транзакция прервана'));
+      try {
+        for (const name of names) {
+          const store = tx.objectStore(name);
+          store.clear();
+          for (const value of data[name]) store.put(encode(name, value));
+        }
+      } catch (error) {
+        try { tx.abort(); } catch { /* уже завершена */ }
+        reject(error);
+      }
+    }),
+
     getSetting: async (key, fallback) => {
       const row = await db.get('settings', key);
       return row === undefined ? fallback : row.value;
