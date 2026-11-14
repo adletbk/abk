@@ -61,6 +61,19 @@ export function parseAmount(text) {
   return Number(whole || 0) * 100 + Number((frac + '00').slice(0, 2));
 }
 
+/**
+ * Сумма, набранная текстом («2 502 000», «1500,5», «−300») → минимальные единицы.
+ * Пустая строка — 0. null, если текст не похож на сумму.
+ */
+export function parseMoneyInput(text) {
+  const clean = String(text).replace(/[\s ]/g, '').replace('−', '-').replace('.', ',');
+  if (clean === '') return 0;
+  const match = clean.match(/^(-?)(\d{1,12})(?:,(\d{1,2}))?$/);
+  if (!match) return null;
+  const minor = Number(match[2]) * 100 + Number(((match[3] ?? '') + '00').slice(0, 2));
+  return match[1] ? -minor : minor;
+}
+
 /** Минимальные единицы → текст клавиатуры (для правки операции). */
 export function amountToText(minor) {
   if (!minor) return '';

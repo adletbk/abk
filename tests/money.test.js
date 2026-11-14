@@ -75,3 +75,17 @@ test('amountToText: обратно в текст клавиатуры', () => {
   assert.equal(amountToText(10770050), '107700,50');
   assert.equal(amountToText(0), '');
 });
+
+test('parseMoneyInput: ввод суммы текстом (начальный остаток)', async () => {
+  const { parseMoneyInput } = await import('../js/money.js');
+  assert.equal(parseMoneyInput('2 502 000'), 250200000);
+  assert.equal(parseMoneyInput('1500,5'), 150050);
+  assert.equal(parseMoneyInput('1500.55'), 150055);
+  assert.equal(parseMoneyInput('-300'), -30000);
+  assert.equal(parseMoneyInput('−300'), -30000);
+  assert.equal(parseMoneyInput(''), 0);
+  assert.equal(parseMoneyInput('  '), 0);
+  assert.equal(parseMoneyInput('abc'), null);
+  assert.equal(parseMoneyInput('1,2,3'), null);
+  assert.equal(parseMoneyInput('1,234'), null); // три знака после запятой — неоднозначно
+});
