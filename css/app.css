@@ -784,3 +784,6 @@ svg.icon { display: block; flex: none; }
 .mono { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 14px; }
 .test-result { margin: 0 4px; font-size: 14px; overflow-wrap: anywhere; }
 .seg-plain { flex-wrap: wrap; }
+
+.card .cat-rows + .card-text { margin-top: 14px; }
+.card .card-text:last-child { margin-bottom: 0; }

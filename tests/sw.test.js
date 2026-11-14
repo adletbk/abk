@@ -38,6 +38,7 @@ test('sw.js: все файлы оболочки есть в SHELL', () => {
   const expected = [
     './', './index.html', './manifest.webmanifest',
     ...walk('js', (n) => n.endsWith('.js')),
+    ...walk('vendor', (n) => n.endsWith('.js')),
     ...walk('css', (n) => n.endsWith('.css')),
     ...walk('fonts', (n) => n.endsWith('.woff2')),
     ...walk('icons', (n) => n.endsWith('.png')),

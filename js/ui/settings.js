@@ -35,6 +35,10 @@ export async function renderSettings(root, ctx) {
         iconName: 'download', color: '#60A5FA', label: 'Экспорт и бэкап',
         sub: lastBackup ? `Последний бэкап: ${new Date(lastBackup).toLocaleDateString('ru-RU')}` : 'Бэкап ещё не делался',
         onClick: () => ctx.navigate('#/backup'),
+      }),
+      listItem({
+        iconName: 'upload', color: '#A78BFA', label: 'Импорт', sub: 'Файлы xlsx и csv, выгрузка Money Manager',
+        onClick: () => ctx.navigate('#/import'),
       })),
     h('div', { class: 'group-title', text: 'Облако' }),
     h('div', { class: 'list' },
@@ -51,9 +55,7 @@ export async function renderSettings(root, ctx) {
         iconName: 'phone', color: '#A78BFA', label: 'Входящие', sub: 'Все записи от Команд iOS',
         tag: inbox.length ? String(inbox.length) : null, onClick: () => ctx.navigate('#/inbox'),
       })),
-    h('div', { class: 'group-title', text: 'Появится позже' }),
-    h('div', { class: 'list' },
-      listItem({ iconName: 'upload', label: 'Импорт xlsx и csv', tag: 'M5' })),
+
     h('div', { class: 'group-title', text: 'Об этом устройстве' }),
     h('p', {
       class: 'note-text',

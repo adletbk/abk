@@ -11,6 +11,7 @@ import { renderBackup } from './ui/backup.js';
 import { renderSync, renderInbox, scheduleSync } from './ui/sync.js';
 import { renderReview, renderRules } from './ui/review.js';
 import { processInbox } from './inbox.js';
+import { renderImport } from './ui/import.js';
 
 const SCREENS = {
   analytics: renderAnalytics,
@@ -23,6 +24,7 @@ const SCREENS = {
   inbox: renderInbox,
   review: renderReview,
   rules: renderRules,
+  import: renderImport,
 };
 
 const root = document.getElementById('app');

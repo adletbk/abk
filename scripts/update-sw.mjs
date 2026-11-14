@@ -18,6 +18,7 @@ const shell = [
   './', './index.html', './manifest.webmanifest',
   ...walk('css', (n) => n.endsWith('.css')),
   ...walk('js', (n) => n.endsWith('.js')),
+  ...walk('vendor', (n) => n.endsWith('.js')),
   ...walk('fonts', (n) => n.endsWith('.woff2')),
   ...walk('icons', (n) => n.endsWith('.png')),
 ];
