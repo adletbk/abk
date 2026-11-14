@@ -172,6 +172,10 @@ export function editAccount(ctx, { account = null } = {}) {
       value: draft.initial_balance < 0 ? `-${amountToText(-draft.initial_balance)}` : amountToText(draft.initial_balance),
       autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Начальный остаток',
     });
+    const hint = h('input', {
+      class: 'field-input', type: 'text', value: draft.hint ?? '', placeholder: 'например, 1234', maxlength: '30',
+      autocomplete: 'off', autocapitalize: 'off', 'aria-label': 'Подсказка для автоматических трат',
+    });
     const icons = choiceGrid({
       className: 'icon-grid', values: ACCOUNT_ICONS, label: 'Иконка',
       get: () => draft.icon, set: (v) => { draft.icon = v; }, render: (v) => icon(v, 22),
@@ -191,7 +195,7 @@ export function editAccount(ctx, { account = null } = {}) {
       if (!text) { toast('Введите название'); return; }
       if (initial === null) { toast('Начальный остаток: введите число'); return; }
       if (patch.hidden && (await visibleOthers()) === 0) { toast('Нужен хотя бы один видимый счёт'); return; }
-      Object.assign(draft, patch, { name: text, initial_balance: initial, updated_at: Date.now() });
+      Object.assign(draft, patch, { name: text, initial_balance: initial, hint: hint.value.trim(), updated_at: Date.now() });
       if (draft.order == null) draft.order = nextOrder(await db.getAll('accounts'));
       await db.put('accounts', draft);
       result = draft;
@@ -215,6 +219,8 @@ export function editAccount(ctx, { account = null } = {}) {
       name,
       h('div', { class: 'field-label', text: 'Начальный остаток' }), balance,
       h('p', { class: 'field-hint', text: 'Хранится только на этом устройстве и в JSON-бэкапе. В Google Таблицу не отправляется.' }),
+      h('div', { class: 'field-label', text: 'Подсказка для автоматических трат' }), hint,
+      h('p', { class: 'field-hint', text: 'Текст, по которому счёт узнаётся в уведомлении или в данных Apple Pay: обычно последние цифры карты. Хранится только на устройстве.' }),
       !account && h('div', { class: 'field-label', text: 'Валюта' }), !account && currency.el,
       h('div', { class: 'field-label', text: 'Иконка' }), icons.el,
       h('button', { type: 'button', class: 'btn-primary', text: 'Сохранить', onClick: () => save() }),

@@ -4,6 +4,8 @@ import { screenHeader, listItem } from './screen.js';
 import { confirmSheet } from './sheet.js';
 import { SyncError, createTransport, getSyncConfig, hasLocalChanges, isSyncUrl, syncNow } from '../sync.js';
 import { plural } from '../model.js';
+import { processInbox } from '../inbox.js';
+import { describeProcessing } from './review.js';
 
 const AUTO_DELAY_MS = 4000;       // пауза после последнего изменения
 const AUTO_INTERVAL_MS = 120000;  // без изменений проверяем таблицу не чаще раза в две минуты
@@ -42,8 +44,13 @@ export async function runSync(ctx, { silent = false } = {}) {
   }
   document.documentElement.classList.add('syncing');
   running = syncNow(ctx.db, createTransport(config.url, config.token))
-    .then((result) => {
-      if (!silent) toast(describe(result));
+    .then(async (result) => {
+      // Новые записи от Команд iOS сразу разбираем в операции.
+      const processed = result.inbox ? await processInbox(ctx.db) : null;
+      if (processed && (processed.created || processed.merged || processed.unparsed)) {
+        toast(describeProcessing(processed), { duration: 4000 });
+        scheduleSync(ctx); // созданные операции и статусы записей уйдут следующей синхронизацией
+      } else if (!silent) toast(describe(result));
       return result;
     }, (error) => {
       if (!silent) toast(error.message, { duration: 5000 });
@@ -164,16 +171,16 @@ export async function renderSync(root, ctx) {
 
 export async function renderInbox(root, ctx) {
   const items = (await ctx.db.getAll('inbox')).sort((a, b) => (b.received_at ?? '').localeCompare(a.received_at ?? ''));
-  const STATUS = { new: 'не разобрано', needs_review: 'проверить', done: 'разобрано' };
+  const STATUS = { new: 'новая', needs_review: 'проверить', done: 'разобрано' };
   clear(root).append(h('div', { class: 'screen' },
     screenHeader(ctx, 'Входящие'),
-    h('p', { class: 'note-text', text: 'Сырые записи от Команд iOS, которые приложение забрало из листа inbox. Разбор в операции появится в M4; до этого записи просто хранятся здесь и в таблице.' }),
+    h('p', { class: 'note-text', text: 'Все сырые записи от Команд iOS, которые приложение забрало из листа inbox, вместе с уже разобранными. То, что требует внимания, собрано в разделе «Проверить».' }),
     items.length
       ? h('div', { class: 'list' }, items.map((item) => listItem({
         iconName: item.source === 'applepay' ? 'card' : 'phone',
         label: item.text || JSON.stringify(item.payload ?? {}),
         sub: [SOURCE_NAMES[item.source] ?? item.source, (item.time ?? item.received_at ?? '').replace('T', ' ').slice(0, 16)].filter(Boolean).join(' · '),
-        tag: STATUS[item.status] ?? item.status,
+        tag: item.ignored ? 'не операция' : STATUS[item.status] ?? item.status,
       })))
       : h('p', { class: 'empty', text: 'Входящих записей нет' }),
     items.length ? h('p', { class: 'note-text', text: `Всего: ${items.length} ${plural(items.length, ['запись', 'записи', 'записей'])}.` }) : null));

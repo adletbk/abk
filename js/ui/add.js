@@ -8,6 +8,8 @@ import {
 } from '../money.js';
 import { editCategory, promptSheet } from './editors.js';
 import { templateFromTransaction, fieldsFromTemplate } from '../catalog.js';
+import { learnMerchant } from '../inbox.js';
+import { eventDate } from '../parser.js';
 import {
   TYPE_LABELS, dayKey, dayShort, localIso, monthKey, newTransaction, todayKey, validateTransaction,
 } from '../model.js';
@@ -17,7 +19,7 @@ const TYPE_ICON = { income: 'arrow-in', expense: 'arrow-out', transfer: 'transfe
 const VISIBLE_CATEGORIES = 4; // остальные открываются плиткой «Ещё»
 const NEW_CATEGORY = '__new__';
 
-export async function renderAdd(root, ctx, { id = null, templateId = null } = {}) {
+export async function renderAdd(root, ctx, { id = null, templateId = null, inboxId = null } = {}) {
   const { db, state } = ctx;
   const [allCategories, allAccounts, lastAccountId] = await Promise.all([
     db.getAll('categories'), db.getAll('accounts'), db.getSetting('last_account_id', null),
@@ -25,6 +27,8 @@ export async function renderAdd(root, ctx, { id = null, templateId = null } = {}
   const existing = id ? await db.get('transactions', id) : null;
   if (id && (!existing || existing.deleted)) { ctx.back(); return; }
   const template = !id && templateId ? await db.get('templates', templateId) : null;
+  // Операция вручную из неразобранной записи: текст уходит в заметку, время берётся из записи.
+  const inboxItem = !id && inboxId ? await db.get('inbox', inboxId) : null;
 
   const accounts = allAccounts.filter((a) => !a.deleted && !a.hidden).sort((a, b) => a.order - b.order);
   const accountsById = new Map(allAccounts.map((a) => [a.id, a]));
@@ -63,6 +67,11 @@ export async function renderAdd(root, ctx, { id = null, templateId = null } = {}
       note: t.note ?? '',
       categoryId: categories.some((c) => c.id === t.category_id) ? t.category_id : null,
     });
+  }
+
+  if (inboxItem) {
+    form.note = (inboxItem.text ?? '').slice(0, 200);
+    form.when = eventDate(inboxItem).slice(0, 16);
   }
 
   // --- переключатель типа: у выбранного видна подпись, у остальных только иконка ---
@@ -214,13 +223,22 @@ export async function renderAdd(root, ctx, { id = null, templateId = null } = {}
       date: form.when + seconds,
     };
     // Правка делает тестовую операцию своей: снимаем пометку demo, чтобы её не стёрла очистка.
-    const tx = existing ? { ...existing, ...fields, demo: false, updated_at: Date.now() } : newTransaction(fields);
+    // Сохранение вручную означает, что операцию проверили.
+    const tx = existing
+      ? { ...existing, ...fields, demo: false, status: 'ok', updated_at: Date.now() }
+      : newTransaction(inboxItem ? {
+        ...fields, source: inboxItem.source === 'sms' ? 'notification' : inboxItem.source,
+        sources: [inboxItem.source], inbox_ids: [inboxItem.id], fingerprint: `inbox:${inboxItem.id}`,
+      } : fields);
     const errors = validateTransaction(tx);
     if (errors.length) { toast(errors[0]); return; }
     saving = true;
     try {
       await db.put('transactions', tx);
       await db.setSetting('last_account_id', tx.account_id);
+      // Запоминаем категорию получателя: следующая такая операция получит её сама.
+      if (existing?.merchant && tx.category_id) await learnMerchant(db, existing.merchant, tx.category_id);
+      if (inboxItem) await db.put('inbox', { ...inboxItem, status: 'done', reason: null, tx_id: tx.id, updated_at: Date.now() });
       state.month = monthKey(tx.date);
       ctx.back();
     } catch (error) {

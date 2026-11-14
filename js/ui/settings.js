@@ -8,6 +8,7 @@ import { formatMoney } from '../money.js';
 import { TYPE_LABELS } from '../model.js';
 import { accountBalances } from '../selectors.js';
 import { moveItem } from '../catalog.js';
+import { reviewCounts } from '../inbox.js';
 
 const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
 
@@ -19,6 +20,7 @@ export async function renderSettings(root, ctx) {
   const [syncUrl, syncAt, syncError, inbox] = await Promise.all([
     db.getSetting('sync_url', ''), db.getSetting('sync_last_at', null), db.getSetting('sync_error', null), db.getAll('inbox'),
   ]);
+  const review = await reviewCounts(db);
   const syncStatus = !syncUrl ? 'Не настроена' : syncError ? `Ошибка: ${syncError.message}`
     : syncAt ? `Последняя: ${new Date(syncAt).toLocaleString('ru-RU')}` : 'Подключена';
 
@@ -37,13 +39,20 @@ export async function renderSettings(root, ctx) {
     h('div', { class: 'group-title', text: 'Облако' }),
     h('div', { class: 'list' },
       listItem({ iconName: 'sync', color: '#10B981', label: 'Синхронизация', sub: syncStatus, onClick: () => ctx.navigate('#/sync') }),
+      ),
+    h('div', { class: 'group-title', text: 'Автоматические траты' }),
+    h('div', { class: 'list' },
       listItem({
-        iconName: 'phone', color: '#A78BFA', label: 'Входящие', sub: 'Записи от Команд iOS',
+        iconName: 'check', color: '#FBBF24', label: 'Проверить', sub: 'Неразобранное и операции без категории',
+        tag: review.total ? String(review.total) : null, onClick: () => ctx.navigate('#/review'),
+      }),
+      listItem({ iconName: 'table', color: '#60A5FA', label: 'Правила разбора', onClick: () => ctx.navigate('#/rules') }),
+      listItem({
+        iconName: 'phone', color: '#A78BFA', label: 'Входящие', sub: 'Все записи от Команд iOS',
         tag: inbox.length ? String(inbox.length) : null, onClick: () => ctx.navigate('#/inbox'),
       })),
     h('div', { class: 'group-title', text: 'Появится позже' }),
     h('div', { class: 'list' },
-      listItem({ iconName: 'table', label: 'Правила разбора уведомлений', tag: 'M4' }),
       listItem({ iconName: 'upload', label: 'Импорт xlsx и csv', tag: 'M5' })),
     h('div', { class: 'group-title', text: 'Об этом устройстве' }),
     h('p', {

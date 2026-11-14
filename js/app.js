@@ -9,6 +9,8 @@ import { renderAnalytics } from './ui/analytics.js';
 import { renderSettings, renderCategories, renderAccounts, renderTemplates } from './ui/settings.js';
 import { renderBackup } from './ui/backup.js';
 import { renderSync, renderInbox, scheduleSync } from './ui/sync.js';
+import { renderReview, renderRules } from './ui/review.js';
+import { processInbox } from './inbox.js';
 
 const SCREENS = {
   analytics: renderAnalytics,
@@ -19,6 +21,8 @@ const SCREENS = {
   backup: renderBackup,
   sync: renderSync,
   inbox: renderInbox,
+  review: renderReview,
+  rules: renderRules,
 };
 
 const root = document.getElementById('app');
@@ -47,10 +51,16 @@ async function main() {
     /** auto: false — не планировать фоновую синхронизацию (рендер вызван самой синхронизацией). */
     async render({ auto = true } = {}) {
       const seq = ++renderSeq;
-      const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?t=([\w-]+))?$/);
+      const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?(t|inbox)=([\w-]+))?$/);
       const screen = SCREENS[location.hash.slice(2)];
       const target = document.createElement('div');
-      if (add) await renderAdd(target, ctx, { id: add[1] ?? null, templateId: add[2] ?? null });
+      if (add) {
+        await renderAdd(target, ctx, {
+          id: add[1] ?? null,
+          templateId: add[2] === 't' ? add[3] : null,
+          inboxId: add[2] === 'inbox' ? add[3] : null,
+        });
+      }
       else if (screen) await screen(target, ctx);
       else await renderHome(target, ctx);
       if (seq !== renderSeq) return; // пришёл более новый рендер
@@ -58,6 +68,9 @@ async function main() {
       if (auto) scheduleSync(ctx); // после любого изменения экраны перерисовываются
     },
   };
+
+  // Записи, которые забрали из таблицы, но не успели разобрать (приложение закрыли).
+  await processInbox(db).catch((error) => console.warn('разбор входящих', error));
 
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); ctx.render(); });
   await ctx.render();

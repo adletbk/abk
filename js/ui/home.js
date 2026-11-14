@@ -8,6 +8,7 @@ import { SOURCE_LABELS, dayTitle, monthTitle, periodTitle, shiftMonth, todayKey 
 import { monthSummary, groupByDay, accountBalances, totalBalance } from '../selectors.js';
 import { clearDemo } from '../seed.js';
 import { runSync } from './sync.js';
+import { reviewCounts } from '../inbox.js';
 
 const TRANSFER_COLOR = '#60A5FA';
 
@@ -17,6 +18,7 @@ export async function renderHome(root, ctx) {
     db.getAll('transactions'), db.getAll('categories'), db.getAll('accounts'), db.getSetting('demo', false),
     db.getSetting('sync_error', null),
   ]);
+  const review = await reviewCounts(db);
   const today = todayKey();
   const categoriesById = new Map(categories.map((c) => [c.id, c]));
   const accountsById = new Map(allAccounts.map((a) => [a.id, a]));
@@ -146,9 +148,19 @@ export async function renderHome(root, ctx) {
       },
     }));
 
+  const reviewBanner = review.total > 0 && h('div', { class: 'banner banner-review' },
+    h('span', { text: `Нужно проверить: ${review.total}` }),
+    h('button', { type: 'button', text: 'Открыть', onClick: () => ctx.navigate('#/review') }));
+
   // --- список по дням ---
   const list = h('section', { class: 'days' });
   const accountName = (id) => accountsById.get(id)?.name ?? 'Счёт';
+
+  // Операция, собранная из двух источников, показывает оба.
+  const SHORT = { applepay: 'Apple Pay', notification: 'банк', sms: 'SMS' };
+  const sourceLabel = (tx) => (tx.sources?.length > 1
+    ? tx.sources.map((s) => SHORT[s] ?? s).join(' + ')
+    : SOURCE_LABELS[tx.source] ?? tx.source);
 
   function row(tx) {
     const isTransfer = tx.type === 'transfer';
@@ -162,7 +174,7 @@ export async function renderHome(root, ctx) {
         icon(isTransfer ? 'transfer' : category?.icon ?? 'dots', 22)),
       h('span', { class: 'row-main' },
         h('span', { class: 'row-title', text: tx.note || fallback }),
-        h('span', { class: 'row-sub', text: `${where} · ${SOURCE_LABELS[tx.source] ?? tx.source}` })),
+        h('span', { class: 'row-sub', text: `${tx.status === 'needs_review' ? 'Проверить · ' : ''}${where} · ${sourceLabel(tx)}` })),
       h('span', { class: 'row-amount' + (tx.type === 'income' ? ' income' : isTransfer ? ' muted' : ''), text: amount }));
   }
 
@@ -201,5 +213,5 @@ export async function renderHome(root, ctx) {
       onClick: () => runSync(ctx),
     }, icon('sync')));
 
-  clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, list, dock));
+  clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, reviewBanner, list, dock));
 }
