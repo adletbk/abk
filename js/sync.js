@@ -117,8 +117,9 @@ export function toWire(store, row, { categoriesById, accountsById }) {
 /** Запись из таблицы → локальная. Локальные поля берутся из существующей записи. */
 export function fromWire(store, wire, local) {
   const { category, account, to_account, ...row } = wire;
-  if (store === 'accounts') return { ...row, initial_balance: local?.initial_balance ?? 0 };
-  return row;
+  const merged = { ...(local ?? {}), ...row };
+  if (store === 'accounts') merged.initial_balance = local?.initial_balance ?? 0;
+  return merged;
 }
 
 // ---------- синхронизация ----------
@@ -168,7 +169,8 @@ async function runSync(db, transport, now) {
   const result = { pushed: {}, pulled: {}, inbox: 0, rejected: 0, duplicates: [] };
 
   // 1. Отправка
-  const changes = await changedSince(db, await db.getSetting('sync_push_mark', 0));
+  const pushMark = await db.getSetting('sync_push_mark', 0);
+  const changes = await changedSince(db, pushMark);
   const lookups = {
     categoriesById: new Map((await db.getAll('categories')).map((c) => [c.id, c])),
     accountsById: new Map((await db.getAll('accounts')).map((a) => [a.id, a])),
@@ -183,6 +185,21 @@ async function runSync(db, transport, now) {
       result.duplicates.push(...(summary?.duplicates ?? []));
     }
   }
+  // Сервер уже знает операцию с таким fingerprint под другим id (её создало другое устройство):
+  // свою копию мягко удаляем, настоящая придёт при получении.
+  for (const duplicate of result.duplicates) {
+    const local = await db.get('transactions', duplicate.id);
+    if (local && !local.deleted) await db.softDelete('transactions', duplicate.id, now);
+  }
+
+  // Статусы разобранных записей inbox.
+  const statuses = (await db.getAll('inbox'))
+    .filter((item) => item.updated_at > pushMark && (item.status === 'done' || item.status === 'needs_review'))
+    .map((item) => ({ id: item.id, status: item.status }));
+  for (let i = 0; i < statuses.length; i += CHUNK) {
+    await transport({ action: 'upsert', inbox: statuses.slice(i, i + CHUNK) });
+  }
+
   // «− 1»: запись, изменённая в ту же миллисекунду, уйдёт в следующий раз, а не потеряется.
   await db.setSetting('sync_push_mark', now - 1);
 

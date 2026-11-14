@@ -1,0 +1,150 @@
+// Обработка входящих записей: операции, «Проверить», дедупликация, автокатегория.
+import { newTransaction } from './model.js';
+import { normalizeMerchant, parseInboxItem } from './parser.js';
+
+/** Окно, в котором Apple Pay и уведомление банка считаются одной покупкой. */
+export const DEDUP_WINDOW_MS = 5 * 60 * 1000;
+const MIN_PARTIAL_MATCH = 4;
+
+const toMs = (date) => new Date(date).getTime();
+
+function merchantsCompatible(a, b) {
+  const x = normalizeMerchant(a);
+  const y = normalizeMerchant(b);
+  return !x || !y || x === y || x.includes(y) || y.includes(x);
+}
+
+/**
+ * Ищет уже созданную автоматически операцию о той же покупке из ДРУГОГО источника:
+ * те же сумма, валюта и тип, близкое время, не противоречащий получатель.
+ * Две одинаковые записи из одного источника — это две покупки, они не сливаются.
+ */
+export function findDuplicate(candidate, txs, { windowMs = DEDUP_WINDOW_MS } = {}) {
+  const at = toMs(candidate.date);
+  let best = null;
+  let bestGap = Infinity;
+  for (const tx of txs) {
+    if (tx.deleted || !Array.isArray(tx.sources) || tx.sources.length === 0) continue; // ручные не трогаем
+    if (tx.sources.includes(candidate.source)) continue;
+    if (tx.amount !== candidate.amount || tx.currency !== candidate.currency || tx.type !== candidate.type) continue;
+    const gap = Math.abs(toMs(tx.date) - at);
+    if (gap > windowMs || !merchantsCompatible(tx.merchant, candidate.merchant)) continue;
+    if (gap < bestGap) { best = tx; bestGap = gap; }
+  }
+  return best;
+}
+
+// ---------- автокатегория «получатель → категория» ----------
+
+const merchantRuleId = (normalized) => `merchant:${normalized}`;
+
+/** Категория по получателю: точное совпадение, затем вхождение (от четырёх символов). */
+export function categoryForMerchant(merchant, rules) {
+  const name = normalizeMerchant(merchant);
+  if (!name) return null;
+  const known = rules.filter((r) => r.kind === 'merchant' && !r.deleted && r.merchant && r.category_id);
+  const exact = known.find((r) => r.merchant === name);
+  if (exact) return exact.category_id;
+  const partial = known
+    .filter((r) => r.merchant.length >= MIN_PARTIAL_MATCH && name.length >= MIN_PARTIAL_MATCH
+      && (name.includes(r.merchant) || r.merchant.includes(name)))
+    .sort((a, b) => b.merchant.length - a.merchant.length)[0];
+  return partial?.category_id ?? null;
+}
+
+/** Запоминает категорию получателя. Вызывается, когда пользователь правит категорию вручную. */
+export async function learnMerchant(db, merchant, categoryId, now = Date.now()) {
+  const name = normalizeMerchant(merchant);
+  if (!name || !categoryId) return;
+  await db.put('rules', {
+    id: merchantRuleId(name), kind: 'merchant', merchant: name, category_id: categoryId,
+    deleted: false, deleted_at: null, updated_at: now,
+  });
+}
+
+// ---------- обработка ----------
+
+/** Сколько всего ждёт проверки: операции без данных и неразобранные записи. */
+export async function reviewCounts(db) {
+  const transactions = (await db.getAll('transactions')).filter((t) => !t.deleted && t.status === 'needs_review').length;
+  const inbox = (await db.getAll('inbox')).filter((i) => i.status === 'needs_review' && !i.ignored).length;
+  return { transactions, inbox, total: transactions + inbox };
+}
+
+/**
+ * Разбирает новые записи inbox. retry: заново пробует неразобранные (после правки правил).
+ * Ничего не теряется: неразобранное остаётся во входящих со статусом needs_review.
+ */
+export async function processInbox(db, { now = Date.now(), retry = false } = {}) {
+  const result = { created: 0, merged: 0, review: 0, unparsed: 0 };
+  const pending = (await db.getAll('inbox'))
+    .filter((item) => item.status === 'new' || (retry && item.status === 'needs_review' && !item.ignored));
+  if (pending.length === 0) return result;
+
+  const [rules, accounts, txs, lastAccountId] = await Promise.all([
+    db.getAll('rules'), db.getAll('accounts'), db.getAll('transactions'), db.getSetting('last_account_id', null),
+  ]);
+  const usable = accounts.filter((a) => !a.deleted && !a.hidden).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const defaultAccountId = usable.some((a) => a.id === lastAccountId) ? lastAccountId : usable[0]?.id ?? null;
+  const context = { rules, accounts, defaultAccountId };
+
+  // По времени события: более ранняя запись становится основой операции.
+  const parsedItems = pending
+    .map((item) => ({ item, parsed: parseInboxItem(item, context, now) }))
+    .sort((a, b) => (a.parsed.fields?.date ?? '').localeCompare(b.parsed.fields?.date ?? ''));
+
+  for (const { item, parsed } of parsedItems) {
+    if (!parsed.ok) {
+      if (item.status !== 'needs_review' || item.reason !== parsed.reason) {
+        await db.put('inbox', { ...item, status: 'needs_review', reason: parsed.reason, updated_at: now });
+        result.unparsed++;
+      }
+      continue;
+    }
+    const fields = parsed.fields;
+    const fingerprint = `inbox:${item.id}`;
+    const done = (txId) => db.put('inbox', { ...item, status: 'done', reason: null, tx_id: txId, updated_at: now });
+
+    // Операция из этой записи уже есть (например, пришла с другого устройства).
+    const already = txs.find((tx) => tx.fingerprint === fingerprint || tx.inbox_ids?.includes(item.id));
+    if (already) { await done(already.id); continue; }
+
+    const duplicate = findDuplicate({ ...fields, source: item.source }, txs);
+    if (duplicate) {
+      const merged = {
+        ...duplicate,
+        sources: [...duplicate.sources, item.source],
+        inbox_ids: [...(duplicate.inbox_ids ?? []), item.id],
+        merchant: duplicate.merchant || fields.merchant,
+        note: duplicate.note || duplicate.merchant || fields.merchant,
+        updated_at: now,
+      };
+      if (!merged.category_id && merged.type !== 'transfer') {
+        merged.category_id = categoryForMerchant(merged.merchant, rules);
+        if (merged.category_id && merged.account_id) merged.status = 'ok';
+      }
+      await db.put('transactions', merged);
+      txs[txs.indexOf(duplicate)] = merged;
+      await done(merged.id);
+      result.merged++;
+      continue;
+    }
+
+    const categoryId = fields.type === 'transfer' ? null : categoryForMerchant(fields.merchant, rules);
+    // Перевод требует второго счёта, которого в уведомлении нет: всегда на проверку.
+    const complete = Boolean(fields.account_id) && fields.type !== 'transfer' && Boolean(categoryId);
+    const tx = newTransaction({
+      date: fields.date, amount: fields.amount, currency: fields.currency, type: fields.type,
+      category_id: categoryId, account_id: fields.account_id, note: fields.merchant, merchant: fields.merchant,
+      source: item.source === 'sms' ? 'notification' : item.source,
+      sources: [item.source], inbox_ids: [item.id], fingerprint,
+      status: complete ? 'ok' : 'needs_review',
+    }, now);
+    await db.put('transactions', tx);
+    txs.push(tx);
+    await done(tx.id);
+    result.created++;
+    if (!complete) result.review++;
+  }
+  return result;
+}

@@ -307,3 +307,40 @@ test('отклонённые сервером записи видны в рез�
   assert.equal(gas.sheet('transactions').objects().length, 0);
   db.close();
 });
+
+test('дубль по fingerprint: своя копия мягко удаляется, приходит операция с другого устройства', async () => {
+  const gas = createGas();
+  const a = await device();
+  const b = await device();
+  const fromA = mine({ fingerprint: 'inbox:same', note: 'с устройства А' });
+  const fromB = mine({ fingerprint: 'inbox:same', note: 'с устройства Б' });
+  await a.put('transactions', fromA);
+  await b.put('transactions', fromB);
+  await syncNow(a, wire(gas).transport, T0 + 5000);
+
+  const result = await syncNow(b, wire(gas).transport, T0 + 6000);
+  assert.deepEqual(result.duplicates, [{ id: fromB.id, existing_id: fromA.id }]);
+  assert.equal((await b.get('transactions', fromB.id)).deleted, true);
+  assert.equal((await b.get('transactions', fromA.id)).note, 'с устройства А');
+  assert.equal(gas.sheet('transactions').objects().length, 1);
+
+  // следующая синхронизация не зацикливается и не плодит строки
+  await syncNow(b, wire(gas).transport, T0 + 7000);
+  assert.equal(gas.sheet('transactions').objects().length, 1);
+  a.close(); b.close();
+});
+
+test('получение не стирает локальные поля операции', async () => {
+  const gas = createGas();
+  const a = await device();
+  const tx = { ...mine(), merchant: 'Магазин', sources: ['applepay'], inbox_ids: ['i1'] };
+  await a.put('transactions', tx);
+  await syncNow(a, wire(gas).transport, T0 + 5000);
+  // правка «с другого устройства»: в таблице появляется более новая версия
+  gas.tick();
+  gas.call({ action: 'upsert', transactions: [{ ...toWire('transactions', tx, { categoriesById: new Map(), accountsById: new Map() }), note: 'Новая заметка', updated_at: T0 + 6000 }] });
+  await syncNow(a, wire(gas).transport, T0 + 7000);
+  const local = await a.get('transactions', tx.id);
+  assert.deepEqual([local.note, local.merchant, local.sources, local.inbox_ids], ['Новая заметка', 'Магазин', ['applepay'], ['i1']]);
+  a.close();
+});
