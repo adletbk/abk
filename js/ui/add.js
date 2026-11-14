@@ -6,6 +6,8 @@ import { createKeypad } from './keypad.js';
 import {
   CURRENCIES, amountToText, currencySymbol, formatKeypadText, keypadReduce, parseAmount,
 } from '../money.js';
+import { editCategory, promptSheet } from './editors.js';
+import { templateFromTransaction, fieldsFromTemplate } from '../catalog.js';
 import {
   TYPE_LABELS, dayKey, dayShort, localIso, monthKey, newTransaction, todayKey, validateTransaction,
 } from '../model.js';
@@ -13,14 +15,16 @@ import {
 const TYPE_ORDER = ['income', 'expense', 'transfer'];
 const TYPE_ICON = { income: 'arrow-in', expense: 'arrow-out', transfer: 'transfer' };
 const VISIBLE_CATEGORIES = 4; // остальные открываются плиткой «Ещё»
+const NEW_CATEGORY = '__new__';
 
-export async function renderAdd(root, ctx, { id = null } = {}) {
+export async function renderAdd(root, ctx, { id = null, templateId = null } = {}) {
   const { db, state } = ctx;
   const [allCategories, allAccounts, lastAccountId] = await Promise.all([
     db.getAll('categories'), db.getAll('accounts'), db.getSetting('last_account_id', null),
   ]);
   const existing = id ? await db.get('transactions', id) : null;
   if (id && (!existing || existing.deleted)) { ctx.back(); return; }
+  const template = !id && templateId ? await db.get('templates', templateId) : null;
 
   const accounts = allAccounts.filter((a) => !a.deleted && !a.hidden).sort((a, b) => a.order - b.order);
   const accountsById = new Map(allAccounts.map((a) => [a.id, a]));
@@ -47,6 +51,19 @@ export async function renderAdd(root, ctx, { id = null } = {}) {
     note: '',
     categoryId: null,
   };
+  if (template && !template.deleted) {
+    const t = fieldsFromTemplate(template);
+    const usable = (accountId) => (accounts.some((a) => a.id === accountId) ? accountId : null);
+    Object.assign(form, {
+      type: t.type,
+      text: amountToText(t.amount ?? 0),
+      accountId: usable(t.account_id) ?? form.accountId,
+      toAccountId: usable(t.to_account_id),
+      currency: t.currency ?? form.currency,
+      note: t.note ?? '',
+      categoryId: categories.some((c) => c.id === t.category_id) ? t.category_id : null,
+    });
+  }
 
   // --- переключатель типа: у выбранного видна подпись, у остальных только иконка ---
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Тип операции' });
@@ -138,10 +155,9 @@ export async function renderAdd(root, ctx, { id = null } = {}) {
   function paintCats() {
     cats.hidden = form.type === 'transfer';
     const ofType = categories.filter((c) => c.type === form.type);
-    const needMore = ofType.length > VISIBLE_CATEGORIES + 1;
-    let visible = needMore ? ofType.slice(0, VISIBLE_CATEGORIES) : ofType;
+    let visible = ofType.slice(0, VISIBLE_CATEGORIES);
     const selected = categoriesById.get(form.categoryId);
-    if (needMore && selected && !visible.includes(selected)) visible = [...visible.slice(0, -1), selected];
+    if (selected && !visible.includes(selected)) visible = [...visible.slice(0, VISIBLE_CATEGORIES - 1), selected];
 
     const tile = (c) => h('button', {
       type: 'button', class: 'cat-tile', 'aria-pressed': String(form.categoryId === c.id),
@@ -149,19 +165,32 @@ export async function renderAdd(root, ctx, { id = null } = {}) {
       onClick: () => { form.categoryId = c.id; paintCats(); },
     }, h('span', { class: 'cat-badge' }, icon(c.icon, 24)), h('span', { class: 'cat-name', text: c.name }));
 
-    clear(cats).append(...visible.map(tile));
-    if (needMore) {
-      cats.append(h('button', { type: 'button', class: 'cat-tile', onClick: pickCategory },
+    clear(cats).append(...visible.map(tile),
+      h('button', { type: 'button', class: 'cat-tile', onClick: pickCategory },
         h('span', { class: 'cat-badge more' }, icon('dots', 24)), h('span', { class: 'cat-name', text: 'Ещё' })));
-    }
   }
   async function pickCategory() {
     const picked = await pickSheet({
       title: 'Категория', selected: form.categoryId,
-      items: categories.filter((c) => c.type === form.type)
-        .map((c) => ({ value: c.id, label: c.name, icon: c.icon, color: c.color })),
+      items: [
+        ...categories.filter((c) => c.type === form.type)
+          .map((c) => ({ value: c.id, label: c.name, icon: c.icon, color: c.color })),
+        { value: NEW_CATEGORY, label: 'Новая категория', icon: 'plus' },
+      ],
     });
-    if (picked) { form.categoryId = picked.value; paintCats(); }
+    if (!picked) return;
+    if (picked.value === NEW_CATEGORY) {
+      const created = await editCategory(ctx, { type: form.type });
+      if (!created || created === 'deleted') return;
+      categories.push(created);
+      categoriesById.set(created.id, created);
+      form.type = created.type;
+      form.categoryId = created.id;
+      paintSeg(); paintChips(); paintCats();
+      return;
+    }
+    form.categoryId = picked.value;
+    paintCats();
   }
 
   // --- клавиатура и действия ---
@@ -201,6 +230,20 @@ export async function renderAdd(root, ctx, { id = null } = {}) {
     }
   }
 
+  async function saveAsTemplate() {
+    const isTransfer = form.type === 'transfer';
+    const fields = {
+      type: form.type, amount: parseAmount(form.text), currency: form.currency, account_id: form.accountId,
+      to_account_id: isTransfer ? form.toAccountId : null,
+      category_id: isTransfer ? null : form.categoryId, note: form.note.trim(),
+    };
+    const suggested = fields.note || categoriesById.get(fields.category_id)?.name || TYPE_LABELS[form.type];
+    const name = await promptSheet({ title: 'Название шаблона', value: suggested });
+    if (!name) return;
+    await db.put('templates', templateFromTransaction(fields, name));
+    toast('Шаблон сохранён');
+  }
+
   async function openMenu() {
     const picked = await pickSheet({
       title: existing ? 'Операция' : 'Новая операция',
@@ -209,7 +252,7 @@ export async function renderAdd(root, ctx, { id = null } = {}) {
         existing && { value: 'delete', label: 'Удалить операцию', icon: 'trash', color: '#F87171' },
       ].filter(Boolean),
     });
-    if (picked?.value === 'template') toast('Шаблоны появятся в M2');
+    if (picked?.value === 'template') await saveAsTemplate();
     if (picked?.value === 'delete') {
       const yes = await confirmSheet({ title: 'Удалить операцию?', confirmLabel: 'Удалить', danger: true });
       if (!yes) return;

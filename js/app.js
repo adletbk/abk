@@ -5,6 +5,18 @@ import { localIso, monthKey } from './model.js';
 import { h, clear, toast } from './ui/dom.js';
 import { renderHome } from './ui/home.js';
 import { renderAdd } from './ui/add.js';
+import { renderAnalytics } from './ui/analytics.js';
+import { renderSettings, renderCategories, renderAccounts, renderTemplates } from './ui/settings.js';
+import { renderBackup } from './ui/backup.js';
+
+const SCREENS = {
+  analytics: renderAnalytics,
+  settings: renderSettings,
+  categories: renderCategories,
+  accounts: renderAccounts,
+  templates: renderTemplates,
+  backup: renderBackup,
+};
 
 const root = document.getElementById('app');
 
@@ -31,9 +43,11 @@ async function main() {
     },
     async render() {
       const seq = ++renderSeq;
-      const route = location.hash.match(/^#\/add(?:\/([\w-]+))?$/);
+      const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?t=([\w-]+))?$/);
+      const screen = SCREENS[location.hash.slice(2)];
       const target = document.createElement('div');
-      if (route) await renderAdd(target, ctx, { id: route[1] ?? null });
+      if (add) await renderAdd(target, ctx, { id: add[1] ?? null, templateId: add[2] ?? null });
+      else if (screen) await screen(target, ctx);
       else await renderHome(target, ctx);
       if (seq !== renderSeq) return; // пришёл более новый рендер
       clear(root).append(...target.childNodes);

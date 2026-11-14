@@ -1,7 +1,8 @@
 // Главная: остаток, баланс месяца, операции по дням, нижняя панель.
 import { h, clear, toast } from './dom.js';
 import { icon } from '../icons.js';
-import { pickSheet, confirmSheet } from './sheet.js';
+import { openSheet, pickSheet, confirmSheet } from './sheet.js';
+import { monthSeries, spendDynamics, dailyAverage, categoryBreakdown, buildInsights } from '../analytics.js';
 import { formatAmount, formatMoney } from '../money.js';
 import { SOURCE_LABELS, dayTitle, monthTitle, periodTitle, shiftMonth, todayKey } from '../model.js';
 import { monthSummary, groupByDay, accountBalances, totalBalance } from '../selectors.js';
@@ -36,8 +37,8 @@ export async function renderHome(root, ctx) {
     chip,
     h('span', { class: 'spacer' }),
     h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Поиск', onClick: toggleSearch }, icon('search')),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Аналитика', onClick: () => toast('Аналитика появится в M2') }, icon('pie')),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Настройки', onClick: () => toast('Настройки появятся в M2') }, icon('settings')));
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Аналитика', onClick: () => ctx.navigate('#/analytics') }, icon('pie')),
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Настройки', onClick: () => ctx.navigate('#/settings') }, icon('settings')));
 
   async function pickAccount() {
     const picked = await pickSheet({
@@ -83,8 +84,45 @@ export async function renderHome(root, ctx) {
         icon('arrow-in', 18), h('span', { text: formatAmount(summary.income) })),
       h('span', { class: 'expense', 'aria-label': `Расход ${formatMoney(summary.expense)}` },
         icon('arrow-out', 18), h('span', { text: formatAmount(summary.expense) }))),
-    h('button', { type: 'button', class: 'pill-btn', onClick: () => toast('Инсайты появятся в M2') },
+    h('button', { type: 'button', class: 'pill-btn', onClick: showInsights },
       icon('sparkles', 20), 'Инсайты'));
+
+  function showInsights() {
+    const opts = { today, accountId: state.accountId };
+    const top = categoryBreakdown(txs, state.month, opts)[0];
+    const lines = buildInsights({
+      summary,
+      dynamics: spendDynamics(txs, state.month, opts),
+      average: dailyAverage(txs, state.month, opts),
+      top: top ? { ...top, name: categoriesById.get(top.category_id)?.name ?? 'Без категории' } : null,
+      forecast: monthSeries(txs, state.month, opts).forecast,
+    });
+    openSheet({
+      title: `Инсайты: ${periodTitle(state.month, today).toLowerCase()}`,
+      content: h('ul', { class: 'insights' }, lines.map((text) => h('li', { text }))),
+    });
+  }
+
+  async function pickTemplate() {
+    const templates = (await db.getAll('templates')).filter((t) => !t.deleted).sort((a, b) => a.updated_at - b.updated_at);
+    if (templates.length === 0) {
+      toast('Шаблонов пока нет. Создайте его из меню «⋮» на экране операции', { duration: 4500 });
+      return;
+    }
+    const picked = await pickSheet({
+      title: 'Шаблоны',
+      items: templates.map((t) => {
+        const category = categoriesById.get(t.category_id);
+        return {
+          value: t.id, label: t.name,
+          icon: t.type === 'transfer' ? 'transfer' : category?.icon ?? 'bolt',
+          color: t.type === 'transfer' ? TRANSFER_COLOR : category?.color ?? '#FBBF24',
+          right: t.amount ? formatMoney(t.amount, t.currency) : null,
+        };
+      }),
+    });
+    if (picked) ctx.navigate(`#/add?t=${picked.value}`);
+  }
 
   function changeMonth(delta) {
     state.month = shiftMonth(state.month, delta);
@@ -153,7 +191,7 @@ export async function renderHome(root, ctx) {
 
   // --- нижняя панель ---
   const dock = h('nav', { class: 'dock', 'aria-label': 'Действия' },
-    h('button', { type: 'button', 'aria-label': 'Шаблоны', onClick: () => toast('Шаблоны появятся в M2') }, icon('bolt')),
+    h('button', { type: 'button', 'aria-label': 'Шаблоны', onClick: pickTemplate }, icon('bolt')),
     h('button', { type: 'button', class: 'dock-add', 'aria-label': 'Добавить операцию', onClick: () => ctx.navigate('#/add') }, icon('plus', 28)),
     h('button', { type: 'button', 'aria-label': 'Синхронизация', onClick: () => toast('Синхронизация появится в M3') }, icon('sync')));
 

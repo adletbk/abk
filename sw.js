@@ -4,7 +4,7 @@
 // приложение не увидит обновление. Список SHELL проверяется тестом tests/sw.test.js.
 // Данные пользователя лежат в IndexedDB и при смене версии кеша не затрагиваются.
 
-const VERSION = 'v2';
+const VERSION = 'v4';
 const CACHE = `finance-shell-${VERSION}`;
 
 const SHELL = [
@@ -13,7 +13,10 @@ const SHELL = [
   './manifest.webmanifest',
   './css/app.css',
   './css/fonts.css',
+  './js/analytics.js',
   './js/app.js',
+  './js/backup.js',
+  './js/catalog.js',
   './js/db.js',
   './js/icons.js',
   './js/model.js',
@@ -21,22 +24,28 @@ const SHELL = [
   './js/seed.js',
   './js/selectors.js',
   './js/ui/add.js',
+  './js/ui/analytics.js',
+  './js/ui/backup.js',
+  './js/ui/chart.js',
   './js/ui/dom.js',
+  './js/ui/editors.js',
   './js/ui/home.js',
   './js/ui/keypad.js',
+  './js/ui/screen.js',
+  './js/ui/settings.js',
   './js/ui/sheet.js',
-  './fonts/IBMPlexSans-Regular-Latin1.woff2',
-  './fonts/IBMPlexSans-Regular-Latin2.woff2',
-  './fonts/IBMPlexSans-Regular-Cyrillic.woff2',
-  './fonts/IBMPlexSans-Medium-Latin1.woff2',
-  './fonts/IBMPlexSans-Medium-Latin2.woff2',
-  './fonts/IBMPlexSans-Medium-Cyrillic.woff2',
-  './fonts/IBMPlexSans-SemiBold-Latin1.woff2',
-  './fonts/IBMPlexSans-SemiBold-Latin2.woff2',
-  './fonts/IBMPlexSans-SemiBold-Cyrillic.woff2',
+  './fonts/IBMPlexSans-Bold-Cyrillic.woff2',
   './fonts/IBMPlexSans-Bold-Latin1.woff2',
   './fonts/IBMPlexSans-Bold-Latin2.woff2',
-  './fonts/IBMPlexSans-Bold-Cyrillic.woff2',
+  './fonts/IBMPlexSans-Medium-Cyrillic.woff2',
+  './fonts/IBMPlexSans-Medium-Latin1.woff2',
+  './fonts/IBMPlexSans-Medium-Latin2.woff2',
+  './fonts/IBMPlexSans-Regular-Cyrillic.woff2',
+  './fonts/IBMPlexSans-Regular-Latin1.woff2',
+  './fonts/IBMPlexSans-Regular-Latin2.woff2',
+  './fonts/IBMPlexSans-SemiBold-Cyrillic.woff2',
+  './fonts/IBMPlexSans-SemiBold-Latin1.woff2',
+  './fonts/IBMPlexSans-SemiBold-Latin2.woff2',
   './icons/apple-touch-icon.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
