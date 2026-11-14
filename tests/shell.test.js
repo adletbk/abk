@@ -26,6 +26,6 @@ test('в коде экранов нет полей типа password', async () 
   const { readdirSync } = await import('node:fs');
   const dir = fileURLToPath(new URL('../js/ui/', import.meta.url));
   for (const name of readdirSync(dir)) {
-    assert.doesNotMatch(readFileSync(dir + name, 'utf8'), /type:s*'password'|type="password"/, name);
+    assert.doesNotMatch(readFileSync(dir + name, 'utf8'), /type:\s*'password'|type="password"/, name);
   }
 });
