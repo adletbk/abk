@@ -327,7 +327,8 @@ function upsertStore(sheet, def, name, records, now, renamed) {
     var pending = createdById[record.id];
     var current = existing ? (dirty[existing.index] || existing.row) : pending;
     if (current) {
-      if (Number(current.updated_at) > record.updated_at) { result.skipped++; return; }
+      // Более старая или та же самая версия: ничего не пишем (повторная отправка безвредна).
+      if (Number(current.updated_at) >= record.updated_at) { result.skipped++; return; }
       var next = def.toRow(record, now);
       trackRename(name, current, next, renamed);
       if (existing) dirty[existing.index] = next; else replaceCreated(created, createdById, record.id, next);
