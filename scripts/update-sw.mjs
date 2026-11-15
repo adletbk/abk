@@ -29,5 +29,11 @@ const version = Number(source.match(/const VERSION = 'v(\d+)';/)[1]) + 1;
 source = source
   .replace(/const VERSION = 'v\d+';/, `const VERSION = 'v${version}';`)
   .replace(/const SHELL = \[[\s\S]*?\];/, `const SHELL = [\n${shell.map((p) => `  '${p}',`).join('\n')}\n];`);
-writeFileSync(path, source);
+// На Windows файл иногда на мгновение занят (антивирус, dev-сервер): повторяем запись.
+for (let attempt = 0; ; attempt++) {
+  try { writeFileSync(path, source); break; } catch (error) {
+    if (attempt >= 8) throw error;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+  }
+}
 console.log(`sw.js: VERSION v${version}, файлов в SHELL: ${shell.length}`);
