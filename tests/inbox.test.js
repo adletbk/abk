@@ -104,7 +104,7 @@ test('processInbox: разобранная запись без известно�
   const db = await device();
   await db.put('inbox', inboxItem());
   const result = await processInbox(db, { now: NOW });
-  assert.deepEqual(result, { created: 1, merged: 0, review: 1, unparsed: 0 });
+  assert.deepEqual(result, { created: 1, merged: 0, review: 1, unparsed: 0, ignored: 0 });
   const [tx] = await live(db);
   assert.deepEqual({
     date: tx.date, amount: tx.amount, type: tx.type, category_id: tx.category_id, account_id: tx.account_id,
@@ -125,7 +125,7 @@ test('processInbox: известный получатель получает к�
   const db = await device();
   await learnMerchant(db, 'Магазин-1', 'cat-food', NOW);
   await db.put('inbox', inboxItem());
-  assert.deepEqual(await processInbox(db, { now: NOW }), { created: 1, merged: 0, review: 0, unparsed: 0 });
+  assert.deepEqual(await processInbox(db, { now: NOW }), { created: 1, merged: 0, review: 0, unparsed: 0, ignored: 0 });
   const [tx] = await live(db);
   assert.deepEqual([tx.category_id, tx.status], ['cat-food', 'ok']);
   db.close();
@@ -134,7 +134,7 @@ test('processInbox: известный получатель получает к�
 test('processInbox: неразобранная запись остаётся во входящих со статусом needs_review', async () => {
   const db = await device();
   await db.put('inbox', inboxItem({ text: 'Ваш код подтверждения 1234' }));
-  assert.deepEqual(await processInbox(db, { now: NOW }), { created: 0, merged: 0, review: 0, unparsed: 1 });
+  assert.deepEqual(await processInbox(db, { now: NOW }), { created: 0, merged: 0, review: 0, unparsed: 1, ignored: 0 });
   assert.equal((await live(db)).length, 0);
   const item = await db.get('inbox', 'i1');
   assert.deepEqual([item.status, item.reason, item.text], ['needs_review', 'no_rule', 'Ваш код подтверждения 1234']);
@@ -146,7 +146,7 @@ test('processInbox: повторный запуск ничего не дубли
   const db = await device();
   await db.put('inbox', inboxItem());
   await processInbox(db, { now: NOW });
-  assert.deepEqual(await processInbox(db, { now: NOW + 1000 }), { created: 0, merged: 0, review: 0, unparsed: 0 });
+  assert.deepEqual(await processInbox(db, { now: NOW + 1000 }), { created: 0, merged: 0, review: 0, unparsed: 0, ignored: 0 });
   assert.equal((await live(db)).length, 1);
   db.close();
 });
@@ -156,7 +156,7 @@ test('processInbox: после появления правила неразоб�
   await db.put('inbox', inboxItem({ text: 'ТЕСТ: оплата 900 ₸' }));
   await processInbox(db, { now: NOW });
   await db.put('rules', newParseRule({ id: 'r2', name: 'Тест: оплата', sources: ['notification'], amount: 'оплата\\s+([\\d\\s]+)', type: 'expense' }, NOW));
-  assert.deepEqual(await processInbox(db, { now: NOW + 1, retry: true }), { created: 1, merged: 0, review: 1, unparsed: 0 });
+  assert.deepEqual(await processInbox(db, { now: NOW + 1, retry: true }), { created: 1, merged: 0, review: 1, unparsed: 0, ignored: 0 });
   assert.equal((await db.get('inbox', 'i1')).status, 'done');
   db.close();
 });
@@ -165,7 +165,7 @@ test('processInbox: Apple Pay и уведомление банка об одно
   const db = await device();
   await db.putMany('inbox', [pay(), inboxItem({ time: '2026-11-13T14:11:20' })]);
   const result = await processInbox(db, { now: NOW });
-  assert.deepEqual(result, { created: 1, merged: 1, review: 1, unparsed: 0 });
+  assert.deepEqual(result, { created: 1, merged: 1, review: 1, unparsed: 0, ignored: 0 });
   const txs = await live(db);
   assert.equal(txs.length, 1);
   assert.deepEqual([txs[0].source, txs[0].sources, txs[0].inbox_ids, txs[0].date],
@@ -180,7 +180,7 @@ test('processInbox: порядок прихода не важен — уведо
   await db.put('inbox', inboxItem({ time: '2026-11-13T14:11:20' }));
   await processInbox(db, { now: NOW });
   await db.put('inbox', pay());
-  assert.deepEqual(await processInbox(db, { now: NOW + 5 }), { created: 0, merged: 1, review: 0, unparsed: 0 });
+  assert.deepEqual(await processInbox(db, { now: NOW + 5 }), { created: 0, merged: 1, review: 0, unparsed: 0, ignored: 0 });
   const txs = await live(db);
   assert.equal(txs.length, 1);
   assert.deepEqual(txs[0].sources, ['notification', 'applepay']);
@@ -223,7 +223,7 @@ test('processInbox: SMS записывается как уведомление �
 test('processInbox: уже подтверждённые и проигнорированные записи не трогаются', async () => {
   const db = await device();
   await db.putMany('inbox', [inboxItem({ id: 'd', status: 'done' }), inboxItem({ id: 'ig', status: 'done', ignored: true })]);
-  assert.deepEqual(await processInbox(db, { now: NOW, retry: true }), { created: 0, merged: 0, review: 0, unparsed: 0 });
+  assert.deepEqual(await processInbox(db, { now: NOW, retry: true }), { created: 0, merged: 0, review: 0, unparsed: 0, ignored: 0 });
   assert.equal((await live(db)).length, 0);
   db.close();
 });
@@ -238,7 +238,7 @@ test('от Команды iOS до таблицы: запись приходит
 
   gas.call({ action: 'add', source: 'notification', text: 'ТЕСТ: списание 4 500 ₸ в МАГАЗИН-1.', time: '2026-11-13T14:10:00' });
   assert.equal((await syncNow(db, transport, NOW)).inbox, 1);
-  assert.deepEqual(await processInbox(db, { now: NOW + 1000 }), { created: 1, merged: 0, review: 1, unparsed: 0 });
+  assert.deepEqual(await processInbox(db, { now: NOW + 1000 }), { created: 1, merged: 0, review: 1, unparsed: 0, ignored: 0 });
   await syncNow(db, transport, NOW + 2000);
 
   const [row] = gas.sheet('transactions').objects();
@@ -250,7 +250,52 @@ test('от Команды iOS до таблицы: запись приходит
   // второе устройство не создаёт вторую операцию из той же записи
   const other = await device();
   await syncNow(other, transport, NOW + 3000);
-  assert.deepEqual(await processInbox(other, { now: NOW + 4000 }), { created: 0, merged: 0, review: 0, unparsed: 0 });
+  assert.deepEqual(await processInbox(other, { now: NOW + 4000 }), { created: 0, merged: 0, review: 0, unparsed: 0, ignored: 0 });
   assert.equal((await live(other)).length, 1);
   db.close(); other.close();
+});
+
+// ---------- «не операция» и Freedom ----------
+const { FREEDOM_PRESET, addPreset } = await import('../js/parser.js');
+
+test('processInbox: запись по правилу «не операция» скрывается сама и в «Проверить» не попадает', async () => {
+  const db = await device();
+  await db.put('rules', newParseRule({ id: 'ig', name: 'Кешбэк', type: 'ignore', match: '^Кешб[эе]к', sources: ['notification'], order: -1 }, NOW));
+  await db.put('inbox', inboxItem({ text: 'Кешбэк за покупку\n+159 ₸\nTEST SHOP' }));
+  assert.deepEqual(await processInbox(db, { now: NOW }), { created: 0, merged: 0, review: 0, unparsed: 0, ignored: 1 });
+  const item = await db.get('inbox', 'i1');
+  assert.deepEqual([item.status, item.ignored, item.text.split('\n')[0]], ['done', true, 'Кешбэк за покупку']);
+  assert.equal((await live(db)).length, 0);
+  assert.equal((await reviewCounts(db)).total, 0);
+  db.close();
+});
+
+test('addPreset: готовые правила добавляются один раз и не затирают правки пользователя', async () => {
+  const db = await device();
+  assert.equal(await addPreset(db, FREEDOM_PRESET, NOW), FREEDOM_PRESET.length);
+  const first = FREEDOM_PRESET[0];
+  await db.put('rules', { ...(await db.get('rules', first.id)), name: 'Моё название', updated_at: NOW + 1 });
+  assert.equal(await addPreset(db, FREEDOM_PRESET, NOW + 2), 0);
+  assert.equal((await db.get('rules', first.id)).name, 'Моё название');
+  db.close();
+});
+
+test('Freedom + Apple Pay: одна покупка, одна операция; кешбэк не создаёт ничего', async () => {
+  const db = await device();
+  await addPreset(db, FREEDOM_PRESET, NOW);
+  await db.putMany('inbox', [
+    pay({ id: 'ap', time: '2026-11-13T15:39:10', text: 'Test_cafe', payload: { amount: '₸18 282,00', merchant: 'Test_cafe', card: 'Freedom Bank Kazakhstan' } }),
+    inboxItem({ id: 'bank', time: '2026-11-13T15:39:40', text: 'Покупка Test cafe\n-18 282 ₸\nДоступно 1 000 850,27 ₸\nСписано с Deposit Card **0000' }),
+    inboxItem({ id: 'cb', time: '2026-11-13T15:42:00', text: 'Кешбэк за покупку\n+1 096,92 ₸\nTEST CAFE' }),
+  ]);
+  assert.deepEqual(await processInbox(db, { now: NOW }), { created: 1, merged: 1, review: 1, unparsed: 0, ignored: 1 });
+  const txs = await live(db);
+  assert.equal(txs.length, 1);
+  assert.deepEqual([txs[0].amount, txs[0].sources, txs[0].merchant], [1828200, ['applepay', 'notification'], 'Test_cafe']);
+
+  // после выбора категории следующая покупка там же проходит без «Проверить»
+  await learnMerchant(db, txs[0].merchant, 'cat-cafe', NOW);
+  await db.put('inbox', inboxItem({ id: 'bank2', time: '2026-11-14T10:00:00', text: 'Покупка Test cafe\n-900 ₸\nДоступно 5 ₸\nСписано с Deposit Card **0000' }));
+  assert.deepEqual(await processInbox(db, { now: NOW + 1 }), { created: 1, merged: 0, review: 0, unparsed: 0, ignored: 0 });
+  db.close();
 });

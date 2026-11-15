@@ -153,3 +153,55 @@ test('parseInboxItem: Apple Pay без суммы идёт на проверку
   const noPayload = item({ source: 'applepay', text: 'Кофейня 1500', payload: null });
   assert.deepEqual(parseInboxItem(noPayload, { rules: [], accounts, defaultAccountId: 'cash' }), { ok: false, reason: 'no_rule' });
 });
+
+// ---------- «не операция» и готовые правила Freedom ----------
+// Формат взят со скриншотов пользователя; суммы, получатели и номер карты заменены выдуманными.
+const { FREEDOM_PRESET, escapeRegex, firstLine } = await import('../js/parser.js');
+const freedom = FREEDOM_PRESET.map((fields, order) => newParseRule({ ...fields, order }, 1));
+const cards = [{ id: 'dep', name: 'Freedom', currency: 'KZT', hint: '0000', deleted: false }, { id: 'cash', name: 'Наличные', currency: 'KZT', hint: '', deleted: false }];
+const ctx = { rules: freedom, accounts: cards, defaultAccountId: 'cash' };
+const PURCHASE = 'Покупка Test cafe\n-18 282 ₸\nДоступно 1 000 850,27 ₸\nСписано с Deposit Card **0000';
+
+test('правило типа «не операция»: достаточно условия, сумма не нужна', () => {
+  const ignore = newParseRule({ name: 'Кешбэк', type: 'ignore', match: '^Кешбэк' }, 1);
+  assert.deepEqual(validateRule(ignore), []);
+  assert.deepEqual(validateRule({ ...ignore, match: '' }), ['Для правила «не операция» нужно условие']);
+  assert.deepEqual(validateRule({ ...ignore, match: '(' }), ['Условие: ошибка в выражении']);
+  assert.deepEqual(parseInboxItem(item({ text: 'Кешбэк за покупку\n+159 ₸\nSHOP' }), { rules: [ignore], accounts, defaultAccountId: 'cash' }),
+    { ok: true, ignore: true, ruleId: ignore.id });
+  assert.equal(parseInboxItem(item({ text: 'Покупка 5 ₸' }), { rules: [ignore], accounts, defaultAccountId: 'cash' }).ok, false);
+});
+
+test('Freedom: покупка с заголовком — сумма, получатель, счёт по цифрам карты', () => {
+  const parsed = parseInboxItem(item({ text: PURCHASE }), ctx);
+  assert.deepEqual(parsed.fields, {
+    type: 'expense', amount: 1828200, currency: 'KZT', merchant: 'Test cafe', account_id: 'dep', date: '2026-11-13T14:10:00',
+  });
+});
+test('Freedom: сумма покупки не путается с остатком «Доступно»', () => {
+  const parsed = parseInboxItem(item({ text: 'Покупка Shop\n-2 650 ₸\nДоступно 1 324 930,27 ₸\nСписано с Deposit Card **0000' }), ctx);
+  assert.equal(parsed.fields.amount, 265000);
+  const fractional = parseInboxItem(item({ text: 'Покупка Shop\n-556,2 ₸\nДоступно 10 ₸\nСписано с Deposit Card **0000' }), ctx);
+  assert.equal(fractional.fields.amount, 55620);
+});
+test('Freedom: только тело уведомления (старая Команда без заголовка) — сумма и счёт, получателя нет', () => {
+  const parsed = parseInboxItem(item({ text: '-18 282 ₸\nДоступно 1 000 850,27 ₸\nСписано с Deposit Card **0000' }), ctx);
+  assert.deepEqual([parsed.ok, parsed.fields.amount, parsed.fields.merchant, parsed.fields.account_id], [true, 1828200, '', 'dep']);
+});
+test('Freedom: кешбэк помечается как не операция', () => {
+  assert.deepEqual(parseInboxItem(item({ text: 'Кешбэк за покупку\n+159 ₸\nTEST SHOP' }), ctx).ignore, true);
+  assert.deepEqual(parseInboxItem(item({ text: 'Кешбек за покупку\n+556,2 ₸\nTEST SHOP' }), ctx).ignore, true, 'оба написания: кешбэк и кешбек');
+});
+test('Freedom: незнакомое уведомление остаётся неразобранным', () => {
+  assert.deepEqual(parseInboxItem(item({ text: 'Акция! Скидки до 50%' }), ctx), { ok: false, reason: 'no_rule' });
+});
+test('готовые правила проходят собственную проверку и имеют постоянные id', () => {
+  for (const rule of freedom) assert.deepEqual(validateRule(rule), [], rule.name);
+  assert.ok(FREEDOM_PRESET.every((r) => /^preset-freedom-/.test(r.id)));
+  assert.equal(new Set(FREEDOM_PRESET.map((r) => r.id)).size, FREEDOM_PRESET.length);
+});
+test('escapeRegex и firstLine: условие по первой строке записи', () => {
+  assert.equal(firstLine('  Кешбэк за покупку (1+1)\n+159 ₸'), 'Кешбэк за покупку (1+1)');
+  assert.equal(new RegExp('^' + escapeRegex('Кешбэк за покупку (1+1)')).test('Кешбэк за покупку (1+1)\n+5'), true);
+  assert.equal(new RegExp(escapeRegex('a.b')).test('axb'), false);
+});

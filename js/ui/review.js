@@ -5,8 +5,12 @@ import { screenHeader, listItem } from './screen.js';
 import { openSheet, pickSheet, confirmSheet } from './sheet.js';
 import { formatMoney } from '../money.js';
 import { TYPE_LABELS, plural } from '../model.js';
-import { RULE_SOURCES, applyRule, matchAccount, newParseRule, validateRule } from '../parser.js';
-import { processInbox } from '../inbox.js';
+import {
+  FREEDOM_PRESET, RULE_SOURCES, RULE_TYPES, addPreset, applyRule, escapeRegex, firstLine, matchAccount,
+  newParseRule, normalizeMerchant, validateRule,
+} from '../parser.js';
+import { learnMerchant, processInbox } from '../inbox.js';
+import { promptSheet } from './editors.js';
 
 const REASONS = { no_rule: 'нет правила', no_amount: 'нет суммы', empty: 'пусто' };
 const when = (item) => (item.time ?? item.received_at ?? '').replace('T', ' ').slice(0, 16);
@@ -17,6 +21,7 @@ export function describeProcessing(result) {
   if (result.created) parts.push(`создано операций: ${result.created}`);
   if (result.merged) parts.push(`объединено: ${result.merged}`);
   if (result.review + result.unparsed) parts.push(`на проверку: ${result.review + result.unparsed}`);
+  if (result.ignored) parts.push(`скрыто как не операции: ${result.ignored}`);
   if (parts.length === 0) return 'Новых записей нет';
   const text = parts.join(', ');
   return text[0].toUpperCase() + text.slice(1);
@@ -47,11 +52,21 @@ export async function renderReview(root, ctx) {
         { value: 'manual', label: 'Создать операцию вручную', icon: 'plus' },
         { value: 'rule', label: 'Создать правило по этой записи', icon: 'table' },
         { value: 'ignore', label: 'Это не операция', icon: 'eye-off' },
+        { value: 'always', label: 'Всегда скрывать такие записи', icon: 'eye-off', color: '#F87171' },
       ],
     });
     if (picked?.value === 'manual') ctx.navigate(`#/add?inbox=${item.id}`);
     if (picked?.value === 'rule') {
       const saved = await editRule(ctx, { sample: item.text, source: item.source });
+      if (saved) await retry();
+    }
+    if (picked?.value === 'always') {
+      // Правило «не операция» по первой строке записи: например, «Кешбэк за покупку».
+      const head = firstLine(item.text);
+      const saved = await editRule(ctx, {
+        sample: item.text, source: item.source,
+        preset: { type: 'ignore', name: `Не операция: ${head}`.slice(0, 60), match: `^\\s*${escapeRegex(head)}`, order: -1 },
+      });
       if (saved) await retry();
     }
     if (picked?.value === 'ignore') {
@@ -100,6 +115,21 @@ export async function renderRules(root, ctx) {
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
   const merchants = rules.filter((r) => r.kind === 'merchant' && !r.deleted).sort((a, b) => a.merchant.localeCompare(b.merchant));
 
+  async function addMerchant() {
+    const name = await promptSheet({ title: 'Получатель', placeholder: 'например: Yozh na mametova shop', submitLabel: 'Дальше' });
+    if (!name || !normalizeMerchant(name)) return;
+    const picked = await pickSheet({
+      title: `Категория для «${name}»`,
+      items: categories.filter((c) => !c.deleted && !c.hidden && c.type === 'expense').sort((a, b) => a.order - b.order)
+        .map((c) => ({ value: c.id, label: c.name, icon: c.icon, color: c.color })),
+    });
+    if (!picked) return;
+    await learnMerchant(db, name, picked.value);
+    const result = await processInbox(db, { retry: true });
+    if (result.created || result.merged) toast(describeProcessing(result));
+    ctx.render();
+  }
+
   async function openMerchant(rule) {
     const yes = await confirmSheet({
       title: `Забыть категорию для «${rule.merchant}»?`,
@@ -115,7 +145,7 @@ export async function renderRules(root, ctx) {
     parse.length
       ? h('div', { class: 'list' }, parse.map((rule) => listItem({
         iconName: 'table', color: '#60A5FA', label: rule.name,
-        sub: `${TYPE_LABELS[rule.type]} · ${rule.sources.map((s) => RULE_SOURCES[s] ?? s).join(', ')}`,
+        sub: `${RULE_TYPES[rule.type]} · ${rule.sources.map((s) => RULE_SOURCES[s] ?? s).join(', ')}`,
         tag: rule.enabled === false ? 'выкл' : null,
         onClick: async () => { if (await editRule(ctx, { rule })) ctx.render(); },
       })))
@@ -123,6 +153,15 @@ export async function renderRules(root, ctx) {
     h('button', {
       type: 'button', class: 'btn-secondary', text: 'Новое правило',
       onClick: async () => { if (await editRule(ctx, { order: parse.length })) ctx.render(); },
+    }),
+    h('button', {
+      type: 'button', class: 'btn-secondary', text: 'Добавить готовые правила Freedom Bank',
+      onClick: async () => {
+        const added = await addPreset(db, FREEDOM_PRESET);
+        const result = await processInbox(db, { retry: true });
+        toast(added ? `Добавлено правил: ${added}. ${describeProcessing(result)}` : 'Эти правила уже есть');
+        ctx.render();
+      },
     }),
 
     h('div', { class: 'group-title', text: 'Получатели и категории' }),
@@ -134,16 +173,17 @@ export async function renderRules(root, ctx) {
         onClick: () => openMerchant(rule),
       })))
       : h('p', { class: 'note-text', text: 'Пока пусто. Список пополняется сам, когда вы выбираете категорию у автоматической операции.' }),
+    h('button', { type: 'button', class: 'btn-secondary', text: 'Добавить получателя', onClick: addMerchant }),
     merchants.length > 0 && h('p', { class: 'note-text', text: `Запомнено: ${merchants.length} ${plural(merchants.length, ['получатель', 'получателя', 'получателей'])}.` })));
 }
 
 /** Редактор правила с проверкой на примере. Возвращает правило, 'deleted' или null. */
-export function editRule(ctx, { rule = null, sample = '', source = 'notification', order = 0 } = {}) {
+export function editRule(ctx, { rule = null, sample = '', source = 'notification', order = 0, preset = {} } = {}) {
   const { db } = ctx;
   return new Promise((resolve) => {
     let result = null;
     let accounts = [];
-    const draft = rule ? { ...rule, sources: [...rule.sources] } : newParseRule({ sources: [source in RULE_SOURCES ? source : 'notification'], order });
+    const draft = rule ? { ...rule, sources: [...rule.sources] } : newParseRule({ sources: [source in RULE_SOURCES ? source : 'notification'], order, ...preset });
 
     const input = (key, label, placeholder) => {
       const el = h('input', {
@@ -168,7 +208,7 @@ export function editRule(ctx, { rule = null, sample = '', source = 'notification
       },
     })));
     const types = h('div', { class: 'seg-plain', role: 'group', 'aria-label': 'Тип операции' });
-    const paintTypes = () => clear(types).append(...Object.entries(TYPE_LABELS).map(([key, label]) => h('button', {
+    const paintTypes = () => clear(types).append(...Object.entries(RULE_TYPES).map(([key, label]) => h('button', {
       type: 'button', text: label, 'aria-pressed': String(draft.type === key),
       onClick: () => { draft.type = key; paintTypes(); check(); },
     })));
@@ -198,6 +238,14 @@ export function editRule(ctx, { rule = null, sample = '', source = 'notification
       const errors = validateRule(draft);
       if (errors.length) { verdict.textContent = errors[0]; verdict.className = 'test-result expense'; return false; }
       const text = example.value.trim();
+      if (draft.type === 'ignore') {
+        let hit = false;
+        try { hit = new RegExp(draft.match, 'i').test(text); } catch { /* проверено выше */ }
+        verdict.textContent = !text ? 'Записи, подходящие под условие, будут скрываться сами.'
+          : hit ? 'Эта запись будет скрыта как «не операция».' : 'Условие не подходит к этому тексту.';
+        verdict.className = 'test-result ' + (!text ? 'muted' : hit ? 'income' : 'expense');
+        return true;
+      }
       if (!text) { verdict.textContent = 'Вставьте пример текста, чтобы проверить правило.'; verdict.className = 'test-result muted'; return true; }
       const found = applyRule(draft, text);
       if (!found) { verdict.textContent = 'Правило не подходит к этому тексту: сумма не найдена.'; verdict.className = 'test-result expense'; return true; }

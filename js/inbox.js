@@ -76,7 +76,7 @@ export async function reviewCounts(db) {
  * Ничего не теряется: неразобранное остаётся во входящих со статусом needs_review.
  */
 export async function processInbox(db, { now = Date.now(), retry = false } = {}) {
-  const result = { created: 0, merged: 0, review: 0, unparsed: 0 };
+  const result = { created: 0, merged: 0, review: 0, unparsed: 0, ignored: 0 };
   const pending = (await db.getAll('inbox'))
     .filter((item) => item.status === 'new' || (retry && item.status === 'needs_review' && !item.ignored));
   if (pending.length === 0) return result;
@@ -99,6 +99,12 @@ export async function processInbox(db, { now = Date.now(), retry = false } = {})
         await db.put('inbox', { ...item, status: 'needs_review', reason: parsed.reason, updated_at: now });
         result.unparsed++;
       }
+      continue;
+    }
+    if (parsed.ignore) {
+      // Правило «не операция»: запись остаётся во входящих, но операции из неё не будет.
+      await db.put('inbox', { ...item, status: 'done', ignored: true, reason: null, rule_id: parsed.ruleId, updated_at: now });
+      result.ignored++;
       continue;
     }
     const fields = parsed.fields;

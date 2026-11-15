@@ -88,11 +88,19 @@ function regexError(label, source, { needGroup = false } = {}) {
   return null;
 }
 
+/** Типы правил: три вида операций и «не операция» (запись скрывается без создания операции). */
+export const RULE_TYPES = { expense: 'Расход', income: 'Доход', transfer: 'Перевод', ignore: 'Не операция' };
+
 /** Список проблем правила; пустой список — правило можно сохранять. */
 export function validateRule(rule) {
   if (!String(rule.name ?? '').trim()) return ['Введите название правила'];
   if (!Array.isArray(rule.sources) || rule.sources.length === 0) return ['Выберите хотя бы один источник'];
-  if (!['expense', 'income', 'transfer'].includes(rule.type)) return ['Выберите тип операции'];
+  if (!(rule.type in RULE_TYPES)) return ['Выберите тип операции'];
+  if (rule.type === 'ignore') {
+    if (!rule.match) return ['Для правила «не операция» нужно условие'];
+    const matchError = regexError('Условие', rule.match);
+    return matchError ? [matchError] : [];
+  }
   if (!rule.amount) {
     const matchError = regexError('Условие', rule.match);
     return [matchError ?? 'Нужно выражение для суммы'];
@@ -182,6 +190,12 @@ export function parseInboxItem(item, { rules, accounts, defaultAccountId }, now 
       && Array.isArray(rule.sources) && rule.sources.includes(item.source))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
   for (const rule of applicable) {
+    if (rule.type === 'ignore') {
+      let hit = false;
+      try { hit = Boolean(rule.match) && compile(rule.match).test(text); } catch { /* сломанное правило не подходит */ }
+      if (hit) return { ok: true, ignore: true, ruleId: rule.id };
+      continue;
+    }
     const found = applyRule(rule, text);
     if (!found) continue;
     return {
@@ -193,4 +207,53 @@ export function parseInboxItem(item, { rules, accounts, defaultAccountId }, now 
     };
   }
   return { ok: false, reason: 'no_rule' };
+}
+
+// ---------- помощники для редактора правил ----------
+
+export const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const firstLine = (text) => String(text ?? '').trim().split(/\r?\n/, 1)[0].trim();
+
+// ---------- готовые правила ----------
+
+/**
+ * Freedom Bank (приложение Freedom SuperApp). Составлено по уведомлениям пользователя.
+ * Команда iOS должна присылать заголовок и текст уведомления вместе, через перенос строки:
+ *
+ *   Покупка <получатель>            Кешбэк за покупку
+ *   -18 282 ₸                       +159 ₸
+ *   Доступно 1 000 850,27 ₸         <ПОЛУЧАТЕЛЬ>
+ *   Списано с Deposit Card **0000
+ *
+ * Третье правило — запасное, для записей без заголовка (только текст уведомления).
+ */
+export const FREEDOM_PRESET = [
+  {
+    id: 'preset-freedom-cashback', name: 'Freedom: кешбэк (не операция)', type: 'ignore',
+    sources: ['notification', 'sms'], match: '^\\s*Кешб[эе]к',
+  },
+  {
+    id: 'preset-freedom-purchase', name: 'Freedom: покупка', type: 'expense', sources: ['notification'],
+    match: '^\\s*Покупка\\s',
+    amount: '^[^\\n]*\\n\\s*[-\u2212]?\\s*([\\d\\s.,]+?)\\s*₸',
+    merchant: '^\\s*Покупка\\s+([^\\n]+)',
+    account: '\\*\\*(\\d{4})',
+  },
+  {
+    id: 'preset-freedom-debit', name: 'Freedom: списание без заголовка', type: 'expense', sources: ['notification'],
+    match: 'Списано с',
+    amount: '^\\s*[-\u2212]\\s*([\\d\\s.,]+?)\\s*₸',
+    account: '\\*\\*(\\d{4})',
+  },
+];
+
+/** Добавляет готовые правила, которых ещё нет. Правки и удаления пользователя не трогает. Возвращает число добавленных. */
+export async function addPreset(db, preset, now = Date.now()) {
+  let added = 0;
+  for (const [order, fields] of preset.entries()) {
+    if (await db.get('rules', fields.id)) continue;
+    await db.put('rules', newParseRule({ ...fields, order }, now));
+    added++;
+  }
+  return added;
 }
