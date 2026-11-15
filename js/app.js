@@ -1,7 +1,7 @@
 // Запуск приложения: база, роутер по hash, service worker.
 import { openDb } from './db.js';
 import { seedIfEmpty } from './seed.js';
-import { localIso, monthKey } from './model.js';
+import { todayKey } from './model.js';
 import { h, clear, toast } from './ui/dom.js';
 import { renderHome } from './ui/home.js';
 import { renderAdd } from './ui/add.js';
@@ -35,8 +35,12 @@ async function main() {
   const db = await openDb();
   await seedIfEmpty(db);
 
+  // Вид периода запоминается между запусками; листание всегда начинается с сегодняшнего дня.
+  const saved = await db.getSetting('period', null);
+  const custom = saved?.from && saved?.to ? { from: saved.from, to: saved.to } : null;
   const state = {
-    month: monthKey(localIso(new Date())),
+    period: saved?.kind === 'custom' && custom ? { kind: 'custom', ...custom } : { kind: saved?.kind ?? 'month', anchor: todayKey() },
+    custom,
     accountId: null,
     query: '',
     searchOpen: false,

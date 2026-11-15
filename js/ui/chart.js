@@ -1,5 +1,6 @@
 // График месяца: накопительный расход, пунктирный прогноз, доход ступенькой. Свой SVG.
 import { h } from './dom.js';
+import { addDays } from '../period.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const num = (n) => +n.toFixed(2);
@@ -32,6 +33,27 @@ export function chartPaths(series, { width, height }) {
   return { expense: expensePath, income: incomePath, forecast: forecastPath, dot, max };
 }
 
+/**
+ * Подписи оси дней: [{ pos, text }], pos — номер точки с единицы.
+ * Целый месяц подписывается числами 1, 10, 20 и последним днём; другие периоды — датами.
+ */
+export function axisTicks({ days, from = null, bucket = 1 }) {
+  const wholeMonth = !from || (bucket === 1 && from.endsWith('-01') && days >= 28 && days <= 31);
+  if (wholeMonth) return [...new Set([1, 10, 20, days])].map((pos) => ({ pos, text: String(pos) }));
+  const positions = days <= 7
+    ? Array.from({ length: days }, (_, i) => i + 1)
+    : [1, Math.round(1 + (days - 1) / 3), Math.round(1 + ((days - 1) * 2) / 3), days];
+  const span = days * bucket;
+  const dayAt = (pos) => addDays(from, (pos - 1) * bucket);
+  const oneMonth = dayAt(1).slice(0, 7) === dayAt(days).slice(0, 7);
+  const text = (pos) => {
+    const day = dayAt(pos);
+    if (oneMonth) return String(Number(day.slice(8)));
+    return span > 366 ? `${day.slice(5, 7)}.${day.slice(2, 4)}` : `${Number(day.slice(8))}.${day.slice(5, 7)}`;
+  };
+  return [...new Set(positions)].map((pos) => ({ pos, text: text(pos) }));
+}
+
 function svg(tag, attrs = {}) {
   const el = document.createElementNS(SVG_NS, tag);
   for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
@@ -60,14 +82,13 @@ export function renderChart(series, { format = null } = {}) {
   if (paths.expense) root.append(svg('path', { class: 'chart-expense', d: paths.expense }));
   if (paths.dot) root.append(svg('circle', { class: 'chart-dot', cx: paths.dot.x, cy: paths.dot.y, r: 4 }));
 
-  const labels = [...new Set([1, 10, 20, series.days])];
-  for (const day of labels) {
+  for (const { pos, text } of axisTicks(series)) {
     const label = svg('text', {
       class: 'chart-label', y: H + 16,
-      x: num(((day - 1) / (series.days - 1)) * W),
-      'text-anchor': day === 1 ? 'start' : day === series.days ? 'end' : 'middle',
+      x: num(series.days > 1 ? ((pos - 1) / (series.days - 1)) * W : 0),
+      'text-anchor': pos === 1 ? 'start' : pos === series.days ? 'end' : 'middle',
     });
-    label.textContent = String(day);
+    label.textContent = text;
     root.append(label);
   }
   return h('div', { class: 'chart-wrap' }, root);
@@ -143,7 +164,7 @@ export function renderStacked(series, colorOf) {
   const root = svg('svg', { class: 'chart', viewBox: `-4 -8 ${W + 8} ${H + 8 + AXIS}`, role: 'img', 'aria-label': 'Суммы по дням с разбивкой по категориям' });
   for (const part of [0, 0.5, 1]) root.append(svg('line', { class: 'chart-grid', x1: 0, x2: W, y1: num(H * part), y2: num(H * part) }));
   const step = W / series.days;
-  const width = Math.max(2, step * 0.68);
+  const width = Math.min(28, Math.max(2, step * 0.68));
   series.byDay.forEach((slot, index) => {
     let y = H;
     for (const id of series.categories) {
@@ -159,9 +180,9 @@ export function renderStacked(series, colorOf) {
       root.append(bar);
     }
   });
-  for (const day of [...new Set([1, 10, 20, series.days])]) {
-    const label = svg('text', { class: 'chart-label', y: H + 16, x: num((day - 0.5) * step), 'text-anchor': 'middle' });
-    label.textContent = String(day);
+  for (const { pos, text } of axisTicks(series)) {
+    const label = svg('text', { class: 'chart-label', y: H + 16, x: num((pos - 0.5) * step), 'text-anchor': 'middle' });
+    label.textContent = text;
     root.append(label);
   }
   return h('div', { class: 'chart-wrap' }, root);

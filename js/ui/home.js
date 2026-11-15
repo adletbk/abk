@@ -4,7 +4,8 @@ import { icon } from '../icons.js';
 import { pickSheet, confirmSheet } from './sheet.js';
 import { accountChip, txRow } from './txrow.js';
 import { formatAmount, formatMoney } from '../money.js';
-import { dayTitle, monthTitle, periodTitle, shiftMonth, todayKey } from '../model.js';
+import { dayTitle, todayKey } from '../model.js';
+import { currentPeriod, periodControl } from './period.js';
 import { monthSummary, groupByDay, excludedAccountIds } from '../selectors.js';
 import { clearDemo } from '../seed.js';
 import { runSync } from './sync.js';
@@ -26,7 +27,8 @@ export async function renderHome(root, ctx) {
   if (state.accountId && !accounts.some((a) => a.id === state.accountId)) state.accountId = null;
   // Счета, скрытые из общего баланса, не участвуют в режиме «Все счета».
   const scope = { accountId: state.accountId, excludeAccounts: excludedAccountIds(allAccounts) };
-  const summary = monthSummary(txs, state.month, scope);
+  const period = currentPeriod(state, txs, today);
+  const summary = monthSummary(txs, period, scope);
 
   // --- шапка ---
   const topbar = h('header', { class: 'topbar' },
@@ -56,10 +58,7 @@ export async function renderHome(root, ctx) {
   const hero = h('section', { class: 'hero' },
     h('div', { class: 'hero-period' },
       h('span', { text: 'Баланс за' }),
-      h('div', { class: 'period' },
-        h('button', { type: 'button', 'aria-label': 'Предыдущий месяц', onClick: () => changeMonth(-1) }, icon('chevron-left', 18)),
-        h('span', { class: 'period-title', text: periodTitle(state.month, today) }),
-        h('button', { type: 'button', 'aria-label': 'Следующий месяц', onClick: () => changeMonth(1) }, icon('chevron-right', 18)))),
+      periodControl(ctx, period, today)),
     h('div', { class: 'hero-amount' + (balanceText.length > 11 ? ' long' : ''), text: balanceText }),
     h('div', { class: 'hero-flow' },
       h('span', { class: 'income', 'aria-label': `Доход ${formatMoney(summary.income)}` },
@@ -88,11 +87,6 @@ export async function renderHome(root, ctx) {
       }),
     });
     if (picked) ctx.navigate(`#/add?t=${picked.value}`);
-  }
-
-  function changeMonth(delta) {
-    state.month = shiftMonth(state.month, delta);
-    ctx.render();
   }
 
   // --- тестовые данные ---
@@ -125,11 +119,11 @@ export async function renderHome(root, ctx) {
       ? txs.map((tx) => ({ ...tx, note: `${tx.note ?? ''}\n${accountName(tx.account_id)}` }))
       : txs;
     const byId = new Map(txs.map((tx) => [tx.id, tx]));
-    const days = groupByDay(searchable, state.month, { ...scope, query: state.query, categoriesById });
+    const days = groupByDay(searchable, period, { ...scope, query: state.query, categoriesById });
     if (days.length === 0) {
       list.append(h('p', {
         class: 'empty',
-        text: state.query.trim() ? 'Ничего не найдено' : `Нет операций за ${monthTitle(state.month, today)}`,
+        text: state.query.trim() ? 'Ничего не найдено' : 'За этот период операций нет',
       }));
       return;
     }

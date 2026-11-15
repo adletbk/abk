@@ -10,8 +10,9 @@ import { editCategory, promptSheet } from './editors.js';
 import { templateFromTransaction, fieldsFromTemplate, orderedCategories } from '../catalog.js';
 import { learnMerchant } from '../inbox.js';
 import { eventDate } from '../parser.js';
+import { revealDay } from '../period.js';
 import {
-  TYPE_LABELS, dayKey, dayShort, localIso, monthKey, newTransaction, todayKey, validateTransaction,
+  TYPE_LABELS, dayKey, dayShort, localIso, newTransaction, todayKey, validateTransaction,
 } from '../model.js';
 
 const TYPE_ORDER = ['income', 'expense', 'transfer'];
@@ -225,7 +226,7 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
       // Запоминаем категорию получателя: следующая такая операция получит её сама.
       if (existing?.merchant && tx.category_id) await learnMerchant(db, existing.merchant, tx.category_id);
       if (inboxItem) await db.put('inbox', { ...inboxItem, status: 'done', reason: null, tx_id: tx.id, updated_at: Date.now() });
-      state.month = monthKey(tx.date);
+      state.period = revealDay(state.period, dayKey(tx.date), todayKey());
       ctx.back();
     } catch (error) {
       saving = false;

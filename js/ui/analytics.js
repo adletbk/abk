@@ -1,12 +1,12 @@
 // Аналитика месяца: доли категорий и четыре вида отчёта. Только факт, без бюджетов.
 import { h, clear } from './dom.js';
 import { icon } from '../icons.js';
-import { periodPill } from './screen.js';
+import { currentPeriod, periodControl } from './period.js';
 import { pickSheet } from './sheet.js';
 import { accountChip } from './txrow.js';
 import { renderChart, renderDonut, renderStacked, renderSankey } from './chart.js';
 import { formatAmount, formatMoney } from '../money.js';
-import { TYPE_LABELS, periodTitle, shiftMonth, todayKey } from '../model.js';
+import { TYPE_LABELS, todayKey } from '../model.js';
 import { monthSummary, excludedAccountIds } from '../selectors.js';
 import { monthSeries, categoryBreakdown, stackedSeries, roundTo } from '../analytics.js';
 import { rollupId } from '../catalog.js';
@@ -36,12 +36,12 @@ export async function renderAnalytics(root, ctx) {
   const type = state.analyticsType;
   const info = (id) => categoriesById.get(id) ?? NO_CATEGORY;
 
-  const rows = categoryBreakdown(txs, state.month, { ...base, type });
+  const period = currentPeriod(state, txs, today);
+  const rows = categoryBreakdown(txs, period, { ...base, type });
   const shown = rows.filter((row) => !off.has(row.category_id));
   const total = shown.reduce((sum, row) => sum + row.amount, 0);
   const largest = rows[0]?.amount ?? 0;
 
-  const changeMonth = (delta) => { state.month = shiftMonth(state.month, delta); ctx.render(); };
   async function pickView() {
     const picked = await pickSheet({
       title: 'Вид отчёта', selected: state.chartType,
@@ -63,7 +63,7 @@ export async function renderAnalytics(root, ctx) {
       onClick: () => { state.analyticsType = value; off.clear(); ctx.render(); },
     }, icon(glyph, 22), type === value && h('span', { text: TYPE_LABELS[value] }))));
   const controls = h('div', { class: 'analytics-controls' }, typeSeg,
-    periodPill(periodTitle(state.month, today), () => changeMonth(-1), () => changeMonth(1)));
+    periodControl(ctx, period, today));
 
   // ---------- диаграмма ----------
   let chart;
@@ -71,8 +71,8 @@ export async function renderAnalytics(root, ctx) {
     chart = renderDonut(shown.map((row) => ({ share: row.amount / total, color: info(row.category_id).color, icon: info(row.category_id).icon })),
       { label: 'Всего', value: formatMoney(total), makeIcon: icon });
   } else if (state.chartType === 'line') {
-    const series = monthSeries(txs, state.month, base);
-    const summary = monthSummary(txs, state.month, base);
+    const series = monthSeries(txs, period, base);
+    const summary = monthSummary(txs, period, base);
     chart = h('section', { class: 'card' }, renderChart(series, { format: formatAmount }),
       h('div', { class: 'legend' },
         h('span', { class: 'expense' }, h('i', { class: 'line' }), formatAmount(summary.expense)),
@@ -80,13 +80,13 @@ export async function renderAnalytics(root, ctx) {
         series.forecast ? h('span', { class: 'expense' }, h('i', { class: 'line dashed' }), `Прогноз ~${formatAmount(roundTo(series.forecast, 100000))}`) : null));
   } else if (state.chartType === 'stacked') {
     const visible = txs.filter((tx) => !off.has(parentOf.get(tx.category_id) ?? tx.category_id));
-    const series = stackedSeries(visible, state.month, { ...base, type });
+    const series = stackedSeries(visible, period, { ...base, type });
     chart = h('section', { class: 'card' },
       series.max ? renderStacked(series, (id) => info(id).color) : h('p', { class: 'empty', text: 'За этот период нет данных' }));
   } else {
     // Потоки: откуда деньги пришли и на что ушли. Не зависит от переключателя «доход / расход».
-    const summary = monthSummary(txs, state.month, base);
-    const expenses = categoryBreakdown(txs, state.month, { ...base, type: 'expense' });
+    const summary = monthSummary(txs, period, base);
+    const expenses = categoryBreakdown(txs, period, { ...base, type: 'expense' });
     const right = expenses.map((row) => ({ label: info(row.category_id).name, amount: row.amount, color: info(row.category_id).color }));
     const left = [];
     if (summary.income) left.push({ label: 'Доход', amount: Math.min(summary.income, Math.max(summary.expense, summary.income)), color: '#10B981' });

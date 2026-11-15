@@ -1,4 +1,4 @@
-// Общие части внутренних экранов: шапка с кнопкой «Назад», строка списка, таблетка периода.
+// Общие части внутренних экранов: шапка с кнопкой «Назад», строка списка.
 import { h } from './dom.js';
 import { icon } from '../icons.js';
 
@@ -7,14 +7,6 @@ export function screenHeader(ctx, title, right = null) {
     h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Назад', onClick: () => ctx.back() }, icon('chevron-left')),
     h('h1', { text: title }),
     right ?? h('span', { class: 'head-spacer' }));
-}
-
-/** Таблетка «‹ Ноябрь ›». */
-export function periodPill(title, onPrev, onNext) {
-  return h('div', { class: 'period' },
-    h('button', { type: 'button', 'aria-label': 'Предыдущий месяц', onClick: onPrev }, icon('chevron-left', 18)),
-    h('span', { class: 'period-title', text: title }),
-    h('button', { type: 'button', 'aria-label': 'Следующий месяц', onClick: onNext }, icon('chevron-right', 18)));
 }
 
 /**

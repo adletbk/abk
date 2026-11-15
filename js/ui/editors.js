@@ -105,7 +105,7 @@ export function editCategory(ctx, { category = null, type = 'expense', parentId 
     let result = null;
     let all = [];
     const draft = category ? { ...category } : {
-      id: uuid(), name: '', icon: 'lu-shapes', color: PALETTE[9], type, parent_id: parentId, order: null,
+      id: uuid(), name: '', icon: 'lu-shapes', color: PALETTE[20], type, parent_id: parentId, order: null,
       hidden: false, deleted: false, deleted_at: null,
     };
     const head = nameRow(draft, 'Название', 'Название категории');
@@ -230,8 +230,8 @@ export function editAccount(ctx, { account = null } = {}) {
   return new Promise((resolve) => {
     let result = null;
     const draft = account ? { color: '#10B981', ...account } : {
-      id: uuid(), name: '', icon: 'wallet', color: PALETTE[5], currency: 'KZT', initial_balance: 0, order: null,
-      exclude_from_total: false, hint: '', hidden: false, deleted: false, deleted_at: null,
+      id: uuid(), name: '', icon: 'wallet', color: PALETTE[14], currency: 'KZT', initial_balance: 0, order: null,
+      exclude_from_total: false, savings: false, hint: '', hidden: false, deleted: false, deleted_at: null,
     };
     const head = nameRow(draft, 'Название', 'Название счёта');
     const balance = h('input', {
@@ -295,8 +295,12 @@ export function editAccount(ctx, { account = null } = {}) {
           label: 'Скрыть из общего баланса', sub: 'Счёт остаётся в списке, но не входит в «Все счета»',
           get: () => Boolean(draft.exclude_from_total), set: (v) => { draft.exclude_from_total = v; },
         }),
+        switchRow({
+          label: 'Сбережения', sub: 'Переводы на этот счёт считаются отложенными деньгами в инсайтах',
+          get: () => Boolean(draft.savings), set: (v) => { draft.savings = v; },
+        }),
         h('label', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Подсказка для автотрат' }), hint)),
-      h('p', { class: 'field-hint', text: 'Подсказка — текст, по которому счёт узнаётся в уведомлении: обычно последние цифры карты. Начальный остаток, цвет и подсказка хранятся только на устройстве и в JSON-бэкапе.' }),
+      h('p', { class: 'field-hint', text: 'Подсказка — текст, по которому счёт узнаётся в уведомлении: обычно последние цифры карты. Начальный остаток, цвет, отметка «Сбережения» и подсказка хранятся только на устройстве и в JSON-бэкапе.' }),
       h('button', { type: 'button', class: 'btn-primary', text: 'Сохранить', onClick: () => save() }),
       account && h('div', { class: 'form-row' },
         h('button', {

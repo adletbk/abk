@@ -154,7 +154,7 @@ export async function renderAccounts(root, ctx) {
     screenHeader(ctx, 'Счета'),
     h('div', { class: 'list' }, accounts.map((account) => listItem({
       iconName: account.icon || 'wallet', color: account.color ?? '#10B981', label: account.name,
-      tag: account.hidden ? 'убран из списков' : account.exclude_from_total ? 'вне общего баланса' : null,
+      tag: account.hidden ? 'убран из списков' : account.exclude_from_total ? 'вне общего баланса' : account.savings ? 'сбережения' : null,
       right: formatMoney(balances.get(account.id), account.currency),
       onClick: async () => { if (await editAccount(ctx, { account })) ctx.render(); },
     }))),

@@ -3,8 +3,8 @@ import { h, clear, toast } from './dom.js';
 import { screenHeader } from './screen.js';
 import { confirmSheet } from './sheet.js';
 import { exportBackup, validateBackup, importBackup, transactionsToCsv } from '../backup.js';
-import { daysInMonth } from '../analytics.js';
-import { localIso, monthKey, plural, todayKey } from '../model.js';
+import { currentPeriod } from './period.js';
+import { plural, todayKey } from '../model.js';
 
 /**
  * Отдаёт файл пользователю. На iPhone открывает системное меню «Поделиться»
@@ -71,7 +71,8 @@ export async function renderBackup(root, ctx) {
       return;
     }
     state.accountId = null;
-    state.month = monthKey(localIso(new Date()));
+    state.period = { kind: 'month', anchor: todayKey() };
+    state.custom = null;
     toast('Данные восстановлены');
     ctx.back();
   }
@@ -81,11 +82,12 @@ export async function renderBackup(root, ctx) {
     onChange: () => { const file = fileInput.files?.[0]; fileInput.value = ''; if (file) restore(file); },
   });
 
-  // csv за период: по умолчанию выбранный на главной месяц
-  const from = h('input', { class: 'field-input', type: 'date', value: `${state.month}-01`, 'aria-label': 'С даты' });
+  // csv за период: по умолчанию выбранный на главной период
+  const period = currentPeriod(state, await db.getAll('transactions'), todayKey());
+  const from = h('input', { class: 'field-input', type: 'date', value: period.from, 'aria-label': 'С даты' });
   const to = h('input', {
     class: 'field-input', type: 'date', 'aria-label': 'По дату',
-    value: `${state.month}-${String(daysInMonth(state.month)).padStart(2, '0')}`,
+    value: period.to,
   });
   async function saveCsv() {
     if (!from.value || !to.value || from.value > to.value) { toast('Проверьте даты периода'); return; }

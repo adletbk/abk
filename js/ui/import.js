@@ -3,7 +3,8 @@ import { h, clear, toast } from './dom.js';
 import { screenHeader, listItem } from './screen.js';
 import { pickSheet } from './sheet.js';
 import { formatMoney } from '../money.js';
-import { TYPE_LABELS, monthKey, plural } from '../model.js';
+import { TYPE_LABELS, plural, todayKey } from '../model.js';
+import { revealDay } from '../period.js';
 import {
   FIELDS, KINDS, MONEY_MANAGER, applyImport, buildDrafts, guessMapping, matchProfile, planImport,
   readCsv, readWorkbook, signature,
@@ -125,7 +126,7 @@ export async function renderImport(root, ctx) {
     const plan = await planImport(db, drafts);
     const report = await applyImport(db, plan);
     const latest = plan.transactions.map((tx) => tx.date).sort().at(-1);
-    if (latest) state.month = monthKey(latest);
+    if (latest) state.period = revealDay(state.period, latest.slice(0, 10), todayKey());
     Object.assign(session, { report: { ...report, errors: errors.length, total: plan.total + errors.length }, step: 'done' });
     ctx.render(); // с автосинхронизацией: новые операции уйдут в таблицу
   }
