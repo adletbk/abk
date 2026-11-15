@@ -1,7 +1,12 @@
 // Справочники: категории, счета, шаблоны. Операции над ними без DOM.
 import { uuid } from './model.js';
 
-export const PALETTE = ['#10B981', '#FB923C', '#60A5FA', '#A78BFA', '#F87171', '#FBBF24', '#A3A3A3'];
+// Яркая палитра по кругу оттенков. Все цвета читаются на тёмных карточках.
+export const PALETTE = [
+  '#FF453A', '#FF6B35', '#FF9F0A', '#FFD60A', '#A8E61D', '#30D158', '#10B981', '#14D2B8',
+  '#22D3EE', '#0A9BFF', '#4C8DFF', '#7C7AFF', '#A26BFF', '#D15CFF', '#FF4D94', '#FF7AB6',
+  '#C8905F', '#A3A3A3',
+];
 
 export const CATEGORY_ICONS = ['cart', 'cup', 'bus', 'car', 'home', 'phone', 'pulse', 'heart', 'shirt', 'play',
   'gift', 'book', 'star', 'wallet', 'briefcase', 'card', 'cash', 'bolt', 'dots'];
@@ -61,4 +66,45 @@ export function templateFromTransaction(fields, name, now = Date.now()) {
 /** Поля операции из шаблона (без даты: она ставится в момент ввода). */
 export function fieldsFromTemplate(template) {
   return pickFields(template);
+}
+
+// ---------- подкатегории ----------
+
+const liveParent = (category, byId) => {
+  const parent = category?.parent_id ? byId.get(category.parent_id) : null;
+  return parent && !parent.deleted ? parent : null;
+};
+
+/** Список для показа: категории верхнего уровня по порядку, подкатегории сразу после родителя. У каждой есть depth. */
+export function orderedCategories(list) {
+  const byId = new Map(list.map((c) => [c.id, c]));
+  const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
+  const out = [];
+  for (const top of list.filter((c) => !liveParent(c, byId)).sort(byOrder)) {
+    out.push({ ...top, depth: 0 });
+    for (const child of list.filter((c) => liveParent(c, byId)?.id === top.id).sort(byOrder)) out.push({ ...child, depth: 1 });
+  }
+  return out;
+}
+
+/** «Родитель / Подкатегория» или просто название. */
+export function categoryPath(id, byId) {
+  const category = byId.get(id);
+  if (!category) return '';
+  const parent = liveParent(category, byId);
+  return parent ? `${parent.name} / ${category.name}` : category.name;
+}
+
+/** Категория верхнего уровня, в которую входит эта (для сводок по категориям). */
+export function rollupId(id, byId) {
+  if (!id) return null;
+  return liveParent(byId.get(id), byId)?.id ?? id;
+}
+
+/** Кого можно назначить родителем: категории верхнего уровня того же типа. Вложенность — один уровень. */
+export function validParents(category, list) {
+  if (list.some((c) => c.parent_id === category.id && !c.deleted)) return [];
+  return list
+    .filter((c) => !c.deleted && !c.parent_id && c.type === category.type && c.id !== category.id)
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 }

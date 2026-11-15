@@ -3,6 +3,8 @@
 // Источник правды — устройство. Таблица хранит копию и принимает сырые записи
 // от Команд iOS (лист inbox). Протокол описан в docs/setup-google.md.
 
+import { categoryPath } from './catalog.js';
+
 const STORES = ['categories', 'accounts', 'templates', 'transactions']; // порядок отправки
 const CHUNK = 200;
 const TIMEOUT_MS = 30000;
@@ -86,7 +88,7 @@ const common = (row) => ({
 export function toWire(store, row, { categoriesById, accountsById }) {
   const names = () => ({
     category_id: row.category_id ?? null,
-    category: categoriesById.get(row.category_id)?.name ?? '',
+    category: categoryPath(row.category_id, categoriesById), // «Родитель / Подкатегория»
     account_id: row.account_id ?? null,
     account: accountsById.get(row.account_id)?.name ?? '',
     to_account_id: row.to_account_id ?? null,

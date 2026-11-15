@@ -124,3 +124,68 @@ test('monthName', () => {
   assert.equal(monthName('2026-11', TODAY), 'Ноябрь');
   assert.equal(monthName('2025-12', TODAY), 'Декабрь 2025');
 });
+
+test('categoryBreakdown: подкатегории складываются в родителя', () => {
+  const parentOf = new Map([['cafe', 'food']]);
+  const rows = categoryBreakdown(txs, '2026-11', { ...opts, parentOf });
+  assert.deepEqual(rows.map((r) => [r.category_id, r.amount]), [['food', 6500]]);
+});
+test('исключённые счета не входят в аналитику «Все счета»', () => {
+  const excludeAccounts = new Set(['A']);
+  assert.deepEqual(categoryBreakdown(txs, '2026-11', { ...opts, excludeAccounts }), []);
+  assert.equal(monthSeries(txs, '2026-11', { ...opts, excludeAccounts }).expense.at(-1), 0);
+  assert.equal(categoryBreakdown(txs, '2026-11', { ...opts, accountId: 'A', excludeAccounts }).length, 2);
+});
+
+// ---------- инсайты ----------
+const {
+  largestExpense, mostExpensiveDay, noSpendingStreak, weekendShare, transactionCount, mostUsedCategory, stackedSeries,
+} = await import('../js/analytics.js');
+
+test('largestExpense и mostExpensiveDay', () => {
+  assert.equal(largestExpense(txs, '2026-11', opts).id, 'e1');
+  assert.deepEqual(mostExpensiveDay(txs, '2026-11', opts), { day: '2026-11-01', amount: 3000 });
+  const twoOnOneDay = [...txs, { ...base, id: 'e9', date: '2026-11-03T18:00:00', amount: 2500 }];
+  assert.deepEqual(mostExpensiveDay(twoOnOneDay, '2026-11', opts), { day: '2026-11-03', amount: 3500 });
+  assert.equal(largestExpense([], '2026-11', opts), null);
+  assert.equal(mostExpensiveDay([], '2026-11', opts), null);
+});
+test('noSpendingStreak: самая длинная серия дней без трат среди прошедших дней', () => {
+  assert.deepEqual(noSpendingStreak(txs, '2026-11', opts), { from: '2026-11-04', to: '2026-11-12', days: 9 });
+  // трат не было совсем: серия — все прошедшие дни
+  assert.deepEqual(noSpendingStreak([], '2026-11', opts), { from: '2026-11-01', to: '2026-11-13', days: 13 });
+  // траты каждый день
+  const daily = Array.from({ length: 13 }, (_, i) => ({ ...base, id: `d${i}`, date: `2026-11-${String(i + 1).padStart(2, '0')}T10:00:00`, amount: 1 }));
+  assert.equal(noSpendingStreak(daily, '2026-11', opts), null);
+  assert.equal(noSpendingStreak(txs, '2026-12', opts), null, 'будущий месяц');
+  // при равных сериях берётся более поздняя
+  const even = [{ ...base, id: 'x', date: '2026-11-07T10:00:00', amount: 1 }];
+  assert.deepEqual(noSpendingStreak(even, '2026-11', opts), { from: '2026-11-08', to: '2026-11-13', days: 6 });
+});
+test('weekendShare, transactionCount, mostUsedCategory', () => {
+  assert.equal(weekendShare(txs, '2026-11', opts), 46); // 1 ноября 2026 — воскресенье: 3000 из 6500
+  assert.equal(weekendShare([], '2026-11', opts), null);
+  assert.equal(transactionCount(txs, '2026-11', opts), 4);
+  assert.deepEqual(mostUsedCategory(txs, '2026-11', opts), { category_id: 'food', count: 2 });
+  assert.equal(mostUsedCategory([], '2026-11', opts), null);
+});
+test('stackedSeries: расходы по дням с разбивкой по категориям', () => {
+  const s = stackedSeries(txs, '2026-11', opts);
+  assert.equal(s.days, 30);
+  assert.deepEqual(s.categories, ['food', 'cafe']);
+  assert.deepEqual(s.byDay[0], { food: 3000 });
+  assert.deepEqual(s.byDay[2], { cafe: 1000 });
+  assert.deepEqual(s.byDay[1], {});
+  assert.equal(s.max, 3000);
+  assert.equal(stackedSeries([], '2026-11', opts).max, 0);
+});
+
+test('ringSegment: сектор кольца начинается сверху и замыкается', async () => {
+  const { ringSegment } = await import('../js/ui/chart.js');
+  const quarter = ringSegment(150, 150, 100, 60, 0, Math.PI / 2);
+  assert.equal(quarter.area, 'M150 50 A100 100 0 0 1 250 150 L210 150 A60 60 0 0 0 150 90 Z');
+  assert.equal(quarter.edge, 'M150 50 A100 100 0 0 1 250 150');
+  const big = ringSegment(150, 150, 100, 60, 0, Math.PI * 1.5);
+  assert.ok(big.area.includes('A100 100 0 1 1'), 'дуга больше половины круга помечается флагом large-arc');
+  assert.ok(!big.area.includes('NaN'));
+});

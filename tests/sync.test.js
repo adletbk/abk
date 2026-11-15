@@ -344,3 +344,12 @@ test('получение не стирает локальные поля опе�
   assert.deepEqual([local.note, local.merchant, local.sources, local.inbox_ids], ['Новая заметка', 'Магазин', ['applepay'], ['i1']]);
   a.close();
 });
+
+test('toWire: у операции с подкатегорией в таблицу уходит «Родитель / Подкатегория»', () => {
+  const lookups = {
+    categoriesById: new Map([['food', { id: 'food', name: 'Еда' }], ['cafe', { id: 'cafe', name: 'Кафе', parent_id: 'food' }]]),
+    accountsById: new Map(),
+  };
+  assert.equal(toWire('transactions', mine({ category_id: 'cafe' }), lookups).category, 'Еда / Кафе');
+  assert.equal(toWire('transactions', mine({ category_id: 'food' }), lookups).category, 'Еда');
+});

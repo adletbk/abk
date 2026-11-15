@@ -16,9 +16,10 @@ export function elapsedDays(month, today) {
 }
 
 /** Доходы и расходы месяца в основной валюте; переводы и удалённые не входят. */
-function pick(txs, month, { currency = 'KZT', accountId = null } = {}) {
+function pick(txs, month, { currency = 'KZT', accountId = null, excludeAccounts = null } = {}) {
   return txs.filter((tx) => !tx.deleted && tx.currency === currency && tx.type !== 'transfer'
-    && monthKey(tx.date) === month && (!accountId || tx.account_id === accountId));
+    && monthKey(tx.date) === month
+    && (accountId ? tx.account_id === accountId : !excludeAccounts?.has(tx.account_id)));
 }
 const dayOf = (tx) => Number(tx.date.slice(8, 10));
 
@@ -78,7 +79,8 @@ export function categoryBreakdown(txs, month, opts = {}) {
   let total = 0;
   for (const tx of pick(txs, month, opts)) {
     if (tx.type !== type) continue;
-    byCategory.set(tx.category_id, (byCategory.get(tx.category_id) ?? 0) + tx.amount);
+    const key = opts.parentOf?.get(tx.category_id) ?? tx.category_id; // подкатегории складываются в родителя
+    byCategory.set(key, (byCategory.get(key) ?? 0) + tx.amount);
     total += tx.amount;
   }
   return [...byCategory]
@@ -117,3 +119,84 @@ export function buildInsights({ summary, dynamics, average, top, forecast }) {
 }
 
 export const roundTo = (minor, step) => Math.round(minor / step) * step;
+
+// ---------- инсайты ----------
+
+const expensesOf = (txs, month, opts) => pick(txs, month, opts).filter((tx) => tx.type === 'expense');
+const dayOfMonth = (month, day) => `${month}-${String(day).padStart(2, '0')}`;
+
+/** Самая крупная трата месяца. */
+export function largestExpense(txs, month, opts = {}) {
+  return expensesOf(txs, month, opts).reduce((best, tx) => (!best || tx.amount > best.amount ? tx : best), null);
+}
+
+/** День с наибольшей суммой трат. */
+export function mostExpensiveDay(txs, month, opts = {}) {
+  const byDay = new Map();
+  for (const tx of expensesOf(txs, month, opts)) byDay.set(tx.date.slice(0, 10), (byDay.get(tx.date.slice(0, 10)) ?? 0) + tx.amount);
+  let best = null;
+  for (const [day, amount] of byDay) if (!best || amount > best.amount) best = { day, amount };
+  return best;
+}
+
+/** Самая длинная серия дней без трат среди прошедших дней месяца; при равенстве — более поздняя. */
+export function noSpendingStreak(txs, month, opts = {}) {
+  const elapsed = elapsedDays(month, opts.today);
+  const spent = new Set(expensesOf(txs, month, opts).map(dayOf));
+  let best = null;
+  let start = null;
+  for (let day = 1; day <= elapsed + 1; day++) {
+    const free = day <= elapsed && !spent.has(day);
+    if (free && start === null) start = day;
+    if (!free && start !== null) {
+      const days = day - start;
+      if (!best || days >= best.days) best = { from: dayOfMonth(month, start), to: dayOfMonth(month, day - 1), days };
+      start = null;
+    }
+  }
+  return best;
+}
+
+/** Доля трат в субботу и воскресенье, в процентах. */
+export function weekendShare(txs, month, opts = {}) {
+  let total = 0;
+  let weekend = 0;
+  for (const tx of expensesOf(txs, month, opts)) {
+    const [y, m, d] = tx.date.slice(0, 10).split('-').map(Number);
+    const weekday = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    total += tx.amount;
+    if (weekday === 0 || weekday === 6) weekend += tx.amount;
+  }
+  return total > 0 ? Math.round((weekend / total) * 100) : null;
+}
+
+/** Число доходов и расходов за месяц (переводы не считаются). */
+export function transactionCount(txs, month, opts = {}) {
+  return pick(txs, month, opts).length;
+}
+
+/** Категория с наибольшим числом трат. */
+export function mostUsedCategory(txs, month, opts = {}) {
+  const counts = new Map();
+  for (const tx of expensesOf(txs, month, opts)) counts.set(tx.category_id, (counts.get(tx.category_id) ?? 0) + 1);
+  let best = null;
+  for (const [category_id, count] of counts) if (!best || count > best.count) best = { category_id, count };
+  return best;
+}
+
+/** Расходы (или доходы) по дням с разбивкой по категориям — для столбчатой диаграммы. */
+export function stackedSeries(txs, month, opts = {}) {
+  const type = opts.type ?? 'expense';
+  const days = daysInMonth(month);
+  const byDay = Array.from({ length: days }, () => ({}));
+  const totals = new Map();
+  for (const tx of pick(txs, month, opts)) {
+    if (tx.type !== type) continue;
+    const key = opts.parentOf?.get(tx.category_id) ?? tx.category_id;
+    const slot = byDay[dayOf(tx) - 1];
+    slot[key] = (slot[key] ?? 0) + tx.amount;
+    totals.set(key, (totals.get(key) ?? 0) + tx.amount);
+  }
+  const max = byDay.reduce((m, slot) => Math.max(m, Object.values(slot).reduce((s, v) => s + v, 0)), 0);
+  return { days, byDay, max, categories: [...totals].sort((a, b) => b[1] - a[1]).map(([id]) => id) };
+}

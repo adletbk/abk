@@ -64,3 +64,18 @@ test('totalBalance: перевод не меняет общий остаток',
   assert.equal(totalBalance(accounts, txs), totalBalance(accounts, withoutTransfer));
   assert.equal(totalBalance(accounts, txs), 59450000);
 });
+
+// ---------- счёт, скрытый из общего баланса ----------
+test('счёт с exclude_from_total не входит в общий остаток, но свой остаток показывает', () => {
+  const accs = [{ id: 'A', currency: 'KZT', initial_balance: 1000 }, { id: 'B', currency: 'KZT', initial_balance: 500, exclude_from_total: true }];
+  assert.equal(totalBalance(accs, []), 1000);
+  assert.equal(accountBalances(accs, []).get('B'), 500);
+});
+test('excludeAccounts: операции скрытого счёта не входят в итоги и список «Все счета»', () => {
+  const excludeAccounts = new Set(['A']);
+  assert.deepEqual(monthSummary(txs, '2026-11', { excludeAccounts }), { income: 0, expense: 0, balance: 0 });
+  assert.deepEqual(groupByDay(txs, '2026-11', { excludeAccounts }), []);
+  // при выборе самого счёта его операции видны
+  assert.equal(monthSummary(txs, '2026-11', { accountId: 'A', excludeAccounts }).income, 50000000);
+  assert.equal(groupByDay(txs, '2026-11', { accountId: 'A', excludeAccounts }).length, 3);
+});

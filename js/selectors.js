@@ -4,12 +4,13 @@ import { dayKey, monthKey } from './model.js';
 const signed = (tx) => (tx.type === 'income' ? tx.amount : tx.type === 'expense' ? -tx.amount : 0);
 
 /** Доход, расход и баланс месяца. Переводы, удалённые и чужая валюта не входят. */
-export function monthSummary(txs, month, { currency = 'KZT', accountId = null } = {}) {
+export function monthSummary(txs, month, { currency = 'KZT', accountId = null, excludeAccounts = null } = {}) {
   let income = 0;
   let expense = 0;
   for (const tx of txs) {
     if (tx.deleted || tx.currency !== currency || monthKey(tx.date) !== month) continue;
     if (accountId && tx.account_id !== accountId) continue;
+    if (!accountId && excludeAccounts?.has(tx.account_id)) continue; // счёт скрыт из общего баланса
     if (tx.type === 'income') income += tx.amount;
     else if (tx.type === 'expense') expense += tx.amount;
   }
@@ -21,12 +22,13 @@ export function monthSummary(txs, month, { currency = 'KZT', accountId = null } 
  * total — доходы минус расходы дня в основной валюте.
  */
 export function groupByDay(txs, month, opts = {}) {
-  const { accountId = null, query = '', categoriesById = new Map(), currency = 'KZT' } = opts;
+  const { accountId = null, query = '', categoriesById = new Map(), currency = 'KZT', excludeAccounts = null } = opts;
   const needle = query.trim().toLowerCase();
   const byDay = new Map();
   for (const tx of txs) {
     if (tx.deleted || monthKey(tx.date) !== month) continue;
     if (accountId && tx.account_id !== accountId && tx.to_account_id !== accountId) continue;
+    if (!accountId && excludeAccounts?.has(tx.account_id)) continue;
     if (needle) {
       const category = categoriesById.get(tx.category_id)?.name ?? '';
       if (!`${tx.note ?? ''}\n${category}`.toLowerCase().includes(needle)) continue;
@@ -65,7 +67,12 @@ export function totalBalance(accounts, txs, currency = 'KZT') {
   const balances = accountBalances(accounts, txs);
   let total = 0;
   for (const account of accounts) {
-    if (account.currency === currency && !account.deleted) total += balances.get(account.id);
+    if (account.currency === currency && !account.deleted && !account.exclude_from_total) total += balances.get(account.id);
   }
   return total;
+}
+
+/** Счета, скрытые из общего баланса: их операции не показываются в режиме «Все счета». */
+export function excludedAccountIds(accounts) {
+  return new Set(accounts.filter((a) => a.exclude_from_total && !a.deleted).map((a) => a.id));
 }

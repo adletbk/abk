@@ -85,3 +85,53 @@ test('шаблон: из операции и обратно', () => {
     to_account_id: null, note: 'Кофе',
   });
 });
+
+// ---------- палитра, иконки, подкатегории ----------
+const { PALETTE, orderedCategories, categoryPath, rollupId, validParents } = await import('../js/catalog.js');
+const { ICON_GROUPS, ICON_NODES } = await import('../js/icons-data.js');
+
+test('палитра: не меньше 16 разных ярких цветов', () => {
+  assert.ok(PALETTE.length >= 16);
+  assert.equal(new Set(PALETTE).size, PALETTE.length);
+  assert.ok(PALETTE.every((c) => /^#[0-9A-F]{6}$/.test(c)));
+});
+test('иконки: каждая иконка из разделов существует и не повторяется', () => {
+  const all = ICON_GROUPS.flatMap((g) => g.icons);
+  assert.ok(ICON_GROUPS.length >= 10 && all.length >= 120);
+  assert.equal(new Set(all).size, all.length);
+  assert.ok(all.every((name) => Array.isArray(ICON_NODES[name]) && ICON_NODES[name].length > 0));
+});
+
+const cats = [
+  { id: 'food', name: 'Еда', type: 'expense', order: 1 },
+  { id: 'home', name: 'Дом', type: 'expense', order: 0 },
+  { id: 'cafe', name: 'Кафе', type: 'expense', order: 5, parent_id: 'food' },
+  { id: 'grocery', name: 'Продукты', type: 'expense', order: 2, parent_id: 'food' },
+  { id: 'orphan', name: 'Сирота', type: 'expense', order: 9, parent_id: 'нет-такой' },
+  { id: 'gone', name: 'Удалённая', type: 'expense', order: 3, deleted: true },
+  { id: 'lost', name: 'Потерянная', type: 'expense', order: 4, parent_id: 'gone' },
+  { id: 'salary', name: 'Зарплата', type: 'income', order: 0 },
+];
+const byId = new Map(cats.map((c) => [c.id, c]));
+
+test('orderedCategories: родители по порядку, подкатегории сразу после родителя', () => {
+  const live = cats.filter((c) => !c.deleted && c.type === 'expense');
+  assert.deepEqual(orderedCategories(live).map((c) => [c.id, c.depth]),
+    [['home', 0], ['food', 0], ['grocery', 1], ['cafe', 1], ['lost', 0], ['orphan', 0]]);
+});
+test('categoryPath и rollupId', () => {
+  assert.equal(categoryPath('cafe', byId), 'Еда / Кафе');
+  assert.equal(categoryPath('food', byId), 'Еда');
+  assert.equal(categoryPath('orphan', byId), 'Сирота');
+  assert.equal(categoryPath('lost', byId), 'Потерянная', 'родитель удалён — показываем без него');
+  assert.equal(categoryPath(null, byId), '');
+  assert.equal(rollupId('cafe', byId), 'food');
+  assert.equal(rollupId('food', byId), 'food');
+  assert.equal(rollupId('orphan', byId), 'orphan');
+  assert.equal(rollupId(null, byId), null);
+});
+test('validParents: только категории верхнего уровня того же типа; у категории с детьми родителя быть не может', () => {
+  assert.deepEqual(validParents(byId.get('cafe'), cats).map((c) => c.id), ['home', 'food']);
+  assert.deepEqual(validParents({ id: 'new', type: 'income' }, cats).map((c) => c.id), ['salary']);
+  assert.deepEqual(validParents(byId.get('food'), cats), []);
+});
