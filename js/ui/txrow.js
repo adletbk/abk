@@ -3,32 +3,37 @@ import { h } from './dom.js';
 import { icon } from '../icons.js';
 import { pickSheet } from './sheet.js';
 import { formatMoney } from '../money.js';
-import { SOURCE_LABELS } from '../model.js';
 import { accountBalances, totalBalance } from '../selectors.js';
 
 const TRANSFER_COLOR = '#4C8DFF';
-const SHORT_SOURCE = { applepay: 'Apple Pay', notification: 'банк', sms: 'SMS' };
 
-/** Операция, собранная из двух источников, показывает оба: «Apple Pay + банк». */
-export const sourceLabel = (tx) => (tx.sources?.length > 1
-  ? tx.sources.map((s) => SHORT_SOURCE[s] ?? s).join(' + ')
-  : SOURCE_LABELS[tx.source] ?? tx.source);
-
+/** Строка: категория, под ней заметка (если есть) и счёт. У перевода — оба счёта и обе суммы. */
 export function txRow(tx, { categoriesById, accountsById, onClick }) {
   const isTransfer = tx.type === 'transfer';
   const category = categoriesById.get(tx.category_id);
-  const name = (id) => accountsById.get(id)?.name ?? 'Счёт';
-  const fallback = isTransfer ? 'Перевод' : category?.name ?? 'Без категории';
-  const where = isTransfer ? `${name(tx.account_id)} → ${name(tx.to_account_id)}` : name(tx.account_id);
-  const amount = tx.type === 'income' ? formatMoney(tx.amount, tx.currency, { sign: true })
-    : isTransfer ? formatMoney(tx.amount, tx.currency) : formatMoney(-tx.amount, tx.currency);
+  const account = (id) => {
+    const found = accountsById.get(id);
+    return h('span', { class: 'row-acct' }, h('span', { class: 'row-acct-icon' }, icon(found?.icon || 'wallet', 12)),
+      h('span', { class: 'row-acct-name', text: found?.name ?? 'Счёт' }));
+  };
+  const amount = isTransfer
+    ? h('span', { class: 'row-amount' },
+      h('span', { text: formatMoney(-tx.amount, tx.currency) }),
+      h('span', { class: 'row-amount-in', text: formatMoney(tx.amount, tx.currency, { sign: true }) }))
+    : h('span', { class: 'row-amount' + (tx.type === 'income' ? ' income' : ''),
+      text: tx.type === 'income' ? formatMoney(tx.amount, tx.currency, { sign: true }) : formatMoney(-tx.amount, tx.currency) });
   return h('button', { type: 'button', class: 'row', onClick },
     h('span', { class: 'cat-badge', style: { '--c': isTransfer ? TRANSFER_COLOR : category?.color ?? '#A3A3A3' } },
       icon(isTransfer ? 'transfer' : category?.icon ?? 'dots', 22)),
     h('span', { class: 'row-main' },
-      h('span', { class: 'row-title', text: tx.note || fallback }),
-      h('span', { class: 'row-sub', text: `${tx.status === 'needs_review' ? 'Проверить · ' : ''}${where} · ${sourceLabel(tx)}` })),
-    h('span', { class: 'row-amount' + (tx.type === 'income' ? ' income' : isTransfer ? ' muted' : ''), text: amount }));
+      h('span', { class: 'row-title', text: isTransfer ? 'Перевод' : category?.name ?? 'Без категории' }),
+      tx.note && h('span', { class: 'row-note', text: tx.note }),
+      h('span', { class: 'row-sub' },
+        tx.status === 'needs_review' && h('span', { class: 'row-flag', text: 'Проверить' }),
+        account(tx.account_id),
+        isTransfer && h('span', { class: 'row-arrow', text: '→' }),
+        isTransfer && account(tx.to_account_id))),
+    amount);
 }
 
 /**
