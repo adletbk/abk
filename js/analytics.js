@@ -1,5 +1,6 @@
 // Аналитика: только факт доходов и расходов, без бюджетов и лимитов. Чистые функции.
-import { monthKey, shiftMonth, plural } from './model.js';
+import { shiftMonth, plural } from './model.js';
+import { rangeOf, spanDays, diffDays, addDays } from './period.js';
 import { formatMoney } from './money.js';
 
 export function daysInMonth(month) {
@@ -7,24 +8,27 @@ export function daysInMonth(month) {
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
 }
 
-/** Сколько дней месяца уже прошло: весь прошлый месяц, 0 для будущего, число сегодня для текущего. */
+/** Сколько дней периода уже прошло: весь прошлый период, 0 для будущего, по сегодня для текущего. */
 export function elapsedDays(month, today) {
-  const current = today.slice(0, 7);
-  if (month < current) return daysInMonth(month);
-  if (month > current) return 0;
-  return Number(today.slice(8, 10));
+  const range = rangeOf(month);
+  if (range.to < today) return spanDays(range);
+  if (range.from > today) return 0;
+  return diffDays(range.from, today) + 1;
 }
 
 /** Доходы и расходы месяца в основной валюте; переводы и удалённые не входят. */
 function pick(txs, month, { currency = 'KZT', accountId = null, excludeAccounts = null } = {}) {
+  const { from, to } = rangeOf(month);
   return txs.filter((tx) => !tx.deleted && tx.currency === currency && tx.type !== 'transfer'
-    && monthKey(tx.date) === month
+    && tx.date.slice(0, 10) >= from && tx.date.slice(0, 10) <= to
     && (accountId ? tx.account_id === accountId : !excludeAccounts?.has(tx.account_id)));
 }
-const dayOf = (tx) => Number(tx.date.slice(8, 10));
+/** Номер дня операции внутри периода, с единицы. */
+const dayIndex = (month) => { const { from } = rangeOf(month); return (tx) => diffDays(from, tx.date.slice(0, 10)) + 1; };
 
 function expenseThrough(txs, month, dayLimit, opts) {
   let total = 0;
+  const dayOf = dayIndex(month);
   for (const tx of pick(txs, month, opts)) if (tx.type === 'expense' && dayOf(tx) <= dayLimit) total += tx.amount;
   return total;
 }
@@ -34,7 +38,9 @@ function expenseThrough(txs, month, dayLimit, opts) {
  * и прогноз расхода на конец месяца (только для текущего месяца).
  */
 export function monthSeries(txs, month, opts = {}) {
-  const days = daysInMonth(month);
+  const range = rangeOf(month);
+  const dayOf = dayIndex(month);
+  const days = spanDays(range);
   const elapsed = elapsedDays(month, opts.today);
   const expenseByDay = new Array(days).fill(0);
   const incomeByDay = new Array(days).fill(0);
@@ -47,9 +53,9 @@ export function monthSeries(txs, month, opts = {}) {
   };
   const expense = cumulative(expenseByDay);
   const income = cumulative(incomeByDay);
-  const isCurrent = month === opts.today.slice(0, 7);
+  const isCurrent = range.from <= opts.today && opts.today < range.to;
   const forecast = isCurrent && elapsed > 0 ? Math.round((expense[elapsed - 1] / elapsed) * days) : null;
-  return { days, elapsed, expense, income, forecast };
+  return { days, elapsed, expense, income, forecast, from: range.from };
 }
 
 /**
@@ -123,7 +129,7 @@ export const roundTo = (minor, step) => Math.round(minor / step) * step;
 // ---------- инсайты ----------
 
 const expensesOf = (txs, month, opts) => pick(txs, month, opts).filter((tx) => tx.type === 'expense');
-const dayOfMonth = (month, day) => `${month}-${String(day).padStart(2, '0')}`;
+const dayOfMonth = (month, day) => addDays(rangeOf(month).from, day - 1);
 
 /** Самая крупная трата месяца. */
 export function largestExpense(txs, month, opts = {}) {
@@ -142,7 +148,7 @@ export function mostExpensiveDay(txs, month, opts = {}) {
 /** Самая длинная серия дней без трат среди прошедших дней месяца; при равенстве — более поздняя. */
 export function noSpendingStreak(txs, month, opts = {}) {
   const elapsed = elapsedDays(month, opts.today);
-  const spent = new Set(expensesOf(txs, month, opts).map(dayOf));
+  const spent = new Set(expensesOf(txs, month, opts).map(dayIndex(month)));
   let best = null;
   let start = null;
   for (let day = 1; day <= elapsed + 1; day++) {
@@ -187,16 +193,57 @@ export function mostUsedCategory(txs, month, opts = {}) {
 /** Расходы (или доходы) по дням с разбивкой по категориям — для столбчатой диаграммы. */
 export function stackedSeries(txs, month, opts = {}) {
   const type = opts.type ?? 'expense';
-  const days = daysInMonth(month);
+  const range = rangeOf(month);
+  const dayOf = dayIndex(month);
+  // Длинный период не помещается по столбцу на день: дни собираются в равные отрезки.
+  const bucket = Math.ceil(spanDays(range) / (opts.maxBars ?? 62));
+  const days = Math.ceil(spanDays(range) / bucket);
   const byDay = Array.from({ length: days }, () => ({}));
   const totals = new Map();
   for (const tx of pick(txs, month, opts)) {
     if (tx.type !== type) continue;
     const key = opts.parentOf?.get(tx.category_id) ?? tx.category_id;
-    const slot = byDay[dayOf(tx) - 1];
+    const slot = byDay[Math.floor((dayOf(tx) - 1) / bucket)];
     slot[key] = (slot[key] ?? 0) + tx.amount;
     totals.set(key, (totals.get(key) ?? 0) + tx.amount);
   }
   const max = byDay.reduce((m, slot) => Math.max(m, Object.values(slot).reduce((s, v) => s + v, 0)), 0);
-  return { days, byDay, max, categories: [...totals].sort((a, b) => b[1] - a[1]).map(([id]) => id) };
+  return { days, byDay, max, from: range.from, bucket, categories: [...totals].sort((a, b) => b[1] - a[1]).map(([id]) => id) };
+}
+
+/** Самое крупное поступление за период. */
+export function largestIncome(txs, month, opts = {}) {
+  return pick(txs, month, opts).filter((tx) => tx.type === 'income')
+    .reduce((best, tx) => (!best || tx.amount > best.amount ? tx : best), null);
+}
+
+/**
+ * Сколько отложено за период: переводы на счета-сбережения минус переводы с них обратно.
+ * Переводы между двумя счетами-сбережениями не считаются.
+ */
+export function savingsFlow(txs, month, { savingsIds, accountId = null, currency = 'KZT' } = {}) {
+  const { from, to } = rangeOf(month);
+  let put = 0;
+  let taken = 0;
+  for (const tx of txs) {
+    const day = tx.date.slice(0, 10);
+    if (tx.deleted || tx.type !== 'transfer' || tx.currency !== currency || day < from || day > to) continue;
+    if (accountId && tx.account_id !== accountId && tx.to_account_id !== accountId) continue;
+    const toSavings = savingsIds.has(tx.to_account_id);
+    const fromSavings = savingsIds.has(tx.account_id);
+    if (toSavings && !fromSavings) put += tx.amount;
+    else if (fromSavings && !toSavings) taken += tx.amount;
+  }
+  return { put, taken, net: put - taken };
+}
+
+/** Доля дохода, отложенная на сбережения, в процентах. null, если дохода не было. */
+export function savedPercent(net, income) {
+  return income > 0 ? Math.round((net / income) * 100) : null;
+}
+
+/** На сколько месяцев хватит денег при расходах как в этом периоде (30 дней = месяц). null, если трат не было. */
+export function fundCoverage(funds, expense, days) {
+  if (expense <= 0 || days <= 0) return null;
+  return Math.max(0, Math.round((funds / ((expense / days) * 30)) * 10) / 10);
 }

@@ -1,14 +1,18 @@
 // Выборки для экранов: итоги месяца, список по дням, остатки. Чистые функции.
-import { dayKey, monthKey } from './model.js';
+import { dayKey } from './model.js';
+import { rangeOf } from './period.js';
 
 const signed = (tx) => (tx.type === 'income' ? tx.amount : tx.type === 'expense' ? -tx.amount : 0);
 
-/** Доход, расход и баланс месяца. Переводы, удалённые и чужая валюта не входят. */
+const outside = (tx, range) => { const day = dayKey(tx.date); return day < range.from || day > range.to; };
+
+/** Доход, расход и баланс за месяц «ГГГГ-ММ» или период. Переводы, удалённые и чужая валюта не входят. */
 export function monthSummary(txs, month, { currency = 'KZT', accountId = null, excludeAccounts = null } = {}) {
+  const range = rangeOf(month);
   let income = 0;
   let expense = 0;
   for (const tx of txs) {
-    if (tx.deleted || tx.currency !== currency || monthKey(tx.date) !== month) continue;
+    if (tx.deleted || tx.currency !== currency || outside(tx, range)) continue;
     if (accountId && tx.account_id !== accountId) continue;
     if (!accountId && excludeAccounts?.has(tx.account_id)) continue; // счёт скрыт из общего баланса
     if (tx.type === 'income') income += tx.amount;
@@ -24,9 +28,10 @@ export function monthSummary(txs, month, { currency = 'KZT', accountId = null, e
 export function groupByDay(txs, month, opts = {}) {
   const { accountId = null, query = '', categoriesById = new Map(), currency = 'KZT', excludeAccounts = null } = opts;
   const needle = query.trim().toLowerCase();
+  const range = rangeOf(month);
   const byDay = new Map();
   for (const tx of txs) {
-    if (tx.deleted || monthKey(tx.date) !== month) continue;
+    if (tx.deleted || outside(tx, range)) continue;
     if (accountId && tx.account_id !== accountId && tx.to_account_id !== accountId) continue;
     if (!accountId && excludeAccounts?.has(tx.account_id)) continue;
     if (needle) {
