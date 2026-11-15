@@ -142,6 +142,9 @@ npm test
 загружается с того же адреса, что и приложение, только на экране импорта.
 Подробности и контрольная сумма: [vendor/README.md](vendor/README.md).
 
+Иконки категорий и счетов взяты из набора [Lucide](https://lucide.dev) (лицензия ISC):
+152 иконки по разделам собраны в `js/icons-data.js`.
+
 ## Шрифт
 
 [IBM Plex Sans](https://github.com/IBM/plex), © IBM Corp., лицензия SIL Open Font License 1.1.

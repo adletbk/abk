@@ -4,7 +4,7 @@
 // приложение не увидит обновление. Список SHELL проверяется тестом tests/sw.test.js.
 // Данные пользователя лежат в IndexedDB и при смене версии кеша не затрагиваются.
 
-const VERSION = 'v15';
+const VERSION = 'v17';
 const CACHE = `finance-shell-${VERSION}`;
 
 const SHELL = [
@@ -18,6 +18,7 @@ const SHELL = [
   './js/backup.js',
   './js/catalog.js',
   './js/db.js',
+  './js/icons-data.js',
   './js/icons.js',
   './js/importer.js',
   './js/inbox.js',
@@ -35,12 +36,14 @@ const SHELL = [
   './js/ui/editors.js',
   './js/ui/home.js',
   './js/ui/import.js',
+  './js/ui/insights.js',
   './js/ui/keypad.js',
   './js/ui/review.js',
   './js/ui/screen.js',
   './js/ui/settings.js',
   './js/ui/sheet.js',
   './js/ui/sync.js',
+  './js/ui/txrow.js',
   './vendor/xlsx.mini.min.js',
   './fonts/IBMPlexSans-Bold-Cyrillic.woff2',
   './fonts/IBMPlexSans-Bold-Latin1.woff2',
