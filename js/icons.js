@@ -1,5 +1,7 @@
 // Набор иконок: собственные контуры на сетке 24×24, обводка 2px. Без внешних ресурсов.
 
+import { ICON_NODES } from './icons-data.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 const ICONS = {
@@ -7,6 +9,8 @@ const ICONS = {
   plus: ['M12 5v14', 'M5 12h14'],
   close: ['M6 6l12 12', 'M18 6L6 18'],
   search: ['M11 4a7 7 0 1 0 0 14a7 7 0 0 0 0-14z', 'M20 20l-3.6-3.6'],
+  bars: ['M5 20v-7', 'M12 20V5', 'M19 20v-11'],
+  flow: ['M3 6c9 0 9 12 18 12', 'M3 18c9 0 9-12 18-12', 'M3 12h18'],
   pie: ['M11 5a8 8 0 1 0 8 8h-8z', 'M15 3.5a6 6 0 0 1 5.5 5.5H15z'],
   settings: ['M12 8.5a3.5 3.5 0 1 0 0 7a3.5 3.5 0 0 0 0-7z', 'M12 3v2.5', 'M12 18.5V21', 'M3 12h2.5', 'M18.5 12H21',
     'M5.6 5.6l1.8 1.8', 'M16.6 16.6l1.8 1.8', 'M5.6 18.4l1.8-1.8', 'M16.6 7.4l1.8-1.8'],
@@ -68,6 +72,16 @@ export function icon(name, size = 24) {
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
   svg.setAttribute('aria-hidden', 'true');
+  // Имена с префиксом lu- — из набора Lucide (js/icons-data.js), остальные нарисованы здесь.
+  const nodes = ICON_NODES[name];
+  if (nodes) {
+    for (const [tag, attrs] of nodes) {
+      const el = document.createElementNS(SVG_NS, tag);
+      for (const [key, value] of Object.entries(attrs)) el.setAttribute(key, value);
+      svg.append(el);
+    }
+    return svg;
+  }
   for (const d of ICONS[name] ?? ICONS.dots) {
     const path = document.createElementNS(SVG_NS, 'path');
     path.setAttribute('d', d);

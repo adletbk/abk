@@ -7,7 +7,11 @@
 |---|---|---|---|
 | `xlsx.mini.min.js` | SheetJS Community Edition, сборка «mini» (чтение xlsx) | 0.20.3 | Apache-2.0, текст в `SheetJS-LICENSE.txt` |
 
-Источник: архив `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, файл `dist/xlsx.mini.min.js`.
+Иконки категорий и счетов — выборка из набора [Lucide](https://lucide.dev) 1.73.0 (лицензия ISC,
+текст в `Lucide-LICENSE.txt`). Выбранные иконки собраны в `js/icons-data.js` скриптом
+`scripts/make-icon-set.mjs`; сам набор в репозитории не хранится.
+
+Источник SheetJS: архив `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`, файл `dist/xlsx.mini.min.js`.
 Версия из npm (0.18.5) не используется: в ней есть известные уязвимости, исправленные в 0.19.3 и 0.20.2.
 
 SHA-256 файла `xlsx.mini.min.js`:
