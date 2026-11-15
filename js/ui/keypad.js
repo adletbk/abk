@@ -2,8 +2,8 @@
 import { h } from './dom.js';
 import { icon } from '../icons.js';
 
-const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '000', '0', 'back'];
-const LABELS = { '000': 'три нуля', back: 'стереть' };
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', ',', '0', 'back'];
+const LABELS = { ',': 'запятая', back: 'стереть' };
 
 export function createKeypad({ onKey }) {
   return h('div', { class: 'keypad' }, KEYS.map((key) => h('button', {

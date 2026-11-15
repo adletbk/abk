@@ -7,7 +7,7 @@ import {
   CURRENCIES, amountToText, currencySymbol, formatKeypadText, keypadReduce, parseAmount,
 } from '../money.js';
 import { editCategory, promptSheet } from './editors.js';
-import { templateFromTransaction, fieldsFromTemplate } from '../catalog.js';
+import { templateFromTransaction, fieldsFromTemplate, orderedCategories } from '../catalog.js';
 import { learnMerchant } from '../inbox.js';
 import { eventDate } from '../parser.js';
 import {
@@ -16,8 +16,7 @@ import {
 
 const TYPE_ORDER = ['income', 'expense', 'transfer'];
 const TYPE_ICON = { income: 'arrow-in', expense: 'arrow-out', transfer: 'transfer' };
-const VISIBLE_CATEGORIES = 4; // остальные открываются плиткой «Ещё»
-const NEW_CATEGORY = '__new__';
+
 
 export async function renderAdd(root, ctx, { id = null, templateId = null, inboxId = null } = {}) {
   const { db, state } = ctx;
@@ -105,7 +104,7 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
   // --- чипы: счёт, куда, дата и время, валюта ---
   const chips = h('div', { class: 'chips' });
   const accountItems = (excludeId) => accounts.filter((a) => a.id !== excludeId)
-    .map((a) => ({ value: a.id, label: a.name, icon: a.icon || 'wallet' }));
+    .map((a) => ({ value: a.id, label: a.name, icon: a.icon || 'wallet', color: a.color }));
 
   function paintChips() {
     const whenInput = h('input', {
@@ -113,8 +112,11 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
       onChange: () => { if (whenInput.value) { form.when = whenInput.value.slice(0, 16); paintChips(); } },
     });
     clear(chips).append(...[
-      h('button', { type: 'button', class: 'chip chip-account', onClick: pickAccount },
-        icon(accountsById.get(form.accountId)?.icon || 'wallet', 20),
+      h('button', {
+        type: 'button', class: 'chip chip-account', onClick: pickAccount,
+        style: accountsById.get(form.accountId)?.color ? { '--c': accountsById.get(form.accountId).color } : null,
+      },
+      icon(accountsById.get(form.accountId)?.icon || 'wallet', 20),
         h('span', { class: 'chip-label', text: accountsById.get(form.accountId)?.name ?? 'Счёт' })),
       form.type === 'transfer' && h('button', { type: 'button', class: 'chip chip-account', onClick: pickToAccount },
         icon('transfer', 20),
@@ -159,47 +161,31 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
     onKeydown: (event) => { if (event.key === 'Enter') note.blur(); },
   });
 
-  // --- категории: первые четыре и «Ещё» ---
+  // --- категории: лента с прокруткой; подкатегории идут сразу за родителем ---
   const cats = h('div', { class: 'cats', role: 'group', 'aria-label': 'Категория' });
-  function paintCats() {
+  function paintCats({ reveal = false } = {}) {
     cats.hidden = form.type === 'transfer';
-    const ofType = categories.filter((c) => c.type === form.type);
-    let visible = ofType.slice(0, VISIBLE_CATEGORIES);
-    const selected = categoriesById.get(form.categoryId);
-    if (selected && !visible.includes(selected)) visible = [...visible.slice(0, VISIBLE_CATEGORIES - 1), selected];
-
+    const scroll = cats.scrollLeft;
     const tile = (c) => h('button', {
-      type: 'button', class: 'cat-tile', 'aria-pressed': String(form.categoryId === c.id),
+      type: 'button', class: 'cat-tile' + (c.depth ? ' sub' : ''), 'aria-pressed': String(form.categoryId === c.id),
       style: { '--c': c.color },
       onClick: () => { form.categoryId = c.id; paintCats(); },
     }, h('span', { class: 'cat-badge' }, icon(c.icon, 24)), h('span', { class: 'cat-name', text: c.name }));
-
-    clear(cats).append(...visible.map(tile),
-      h('button', { type: 'button', class: 'cat-tile', onClick: pickCategory },
-        h('span', { class: 'cat-badge more' }, icon('dots', 24)), h('span', { class: 'cat-name', text: 'Ещё' })));
+    clear(cats).append(
+      h('button', { type: 'button', class: 'cat-tile', 'aria-label': 'Новая категория', onClick: createCategory },
+        h('span', { class: 'cat-badge more' }, icon('plus', 24)), h('span', { class: 'cat-name', text: 'Новая' })),
+      ...orderedCategories(categories.filter((c) => c.type === form.type)).map(tile));
+    cats.scrollLeft = scroll;
+    if (reveal) cats.querySelector('[aria-pressed="true"]')?.scrollIntoView({ block: 'nearest', inline: 'center' });
   }
-  async function pickCategory() {
-    const picked = await pickSheet({
-      title: 'Категория', selected: form.categoryId,
-      items: [
-        ...categories.filter((c) => c.type === form.type)
-          .map((c) => ({ value: c.id, label: c.name, icon: c.icon, color: c.color })),
-        { value: NEW_CATEGORY, label: 'Новая категория', icon: 'plus' },
-      ],
-    });
-    if (!picked) return;
-    if (picked.value === NEW_CATEGORY) {
-      const created = await editCategory(ctx, { type: form.type });
-      if (!created || created === 'deleted') return;
-      categories.push(created);
-      categoriesById.set(created.id, created);
-      form.type = created.type;
-      form.categoryId = created.id;
-      paintSeg(); paintChips(); paintCats();
-      return;
-    }
-    form.categoryId = picked.value;
-    paintCats();
+  async function createCategory() {
+    const created = await editCategory(ctx, { type: form.type });
+    if (!created || created === 'deleted') return;
+    categories.push(created);
+    categoriesById.set(created.id, created);
+    form.type = created.type;
+    form.categoryId = created.id;
+    paintSeg(); paintChips(); paintCats({ reveal: true });
   }
 
   // --- клавиатура и действия ---
@@ -282,6 +268,8 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
   paintSeg(); paintAmount(); paintChips(); paintCats();
 
   clear(root).append(screen);
+  // Выбранная категория должна быть видна сразу (экран к этому моменту ещё не в документе).
+  requestAnimationFrame(() => paintCats({ reveal: true }));
   screen.append(
     h('div', { class: 'add-top' },
       h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Закрыть', onClick: () => ctx.back() }, icon('close')),

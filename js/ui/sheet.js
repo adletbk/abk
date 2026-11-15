@@ -3,8 +3,8 @@ import { h } from './dom.js';
 import { icon } from '../icons.js';
 
 /** Открывает лист с произвольным содержимым. Возвращает функцию закрытия. */
-export function openSheet({ title, content, onClose = null }) {
-  const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+export function openSheet({ title, content, onClose = null, tall = false }) {
+  const sheet = h('div', { class: 'sheet' + (tall ? ' tall' : ''), role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('h2', { class: 'sheet-title', text: title }), content);
   const backdrop = h('div', { class: 'sheet-backdrop' }, sheet);
   let open = true;

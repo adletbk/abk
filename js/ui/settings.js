@@ -7,7 +7,7 @@ import { editCategory, editAccount, promptSheet } from './editors.js';
 import { formatMoney } from '../money.js';
 import { TYPE_LABELS } from '../model.js';
 import { accountBalances } from '../selectors.js';
-import { moveItem } from '../catalog.js';
+import { moveItem, orderedCategories } from '../catalog.js';
 import { reviewCounts } from '../inbox.js';
 
 const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
@@ -70,8 +70,9 @@ export async function renderSettings(root, ctx) {
 export async function renderCategories(root, ctx) {
   const { db, state } = ctx;
   state.catType ??= 'expense';
-  const all = (await db.getAll('categories')).filter((c) => !c.deleted);
-  const list = all.filter((c) => c.type === state.catType).sort(byOrder);
+  const all = (await db.getAll('categories')).filter((c) => !c.deleted && c.type === state.catType);
+  const ordered = orderedCategories(all);
+  const tops = ordered.filter((c) => c.depth === 0);
 
   const tabs = h('div', { class: 'seg-plain', role: 'group', 'aria-label': 'Тип категорий' },
     ['expense', 'income'].map((type) => h('button', {
@@ -79,43 +80,50 @@ export async function renderCategories(root, ctx) {
       onClick: () => { state.catType = type; ctx.render(); },
     })));
 
+  const edit = async (id) => { if (await editCategory(ctx, { category: all.find((c) => c.id === id) })) ctx.render(); };
+  const row = (category, lead) => listItem({
+    lead, iconName: category.icon, color: category.color, label: category.name,
+    tag: category.hidden ? 'скрыта' : null, onClick: () => edit(category.id),
+  });
+
+  // Перетаскивается категория верхнего уровня вместе со своими подкатегориями.
   const listEl = h('div', { class: 'list' });
-  for (const category of list) {
-    const handle = h('button', { type: 'button', class: 'drag-handle', 'aria-label': `Переместить «${category.name}»` }, icon('drag', 20));
-    const row = listItem({
-      lead: handle, iconName: category.icon, color: category.color, label: category.name,
-      tag: category.hidden ? 'скрыта' : null,
-      onClick: async () => { if (await editCategory(ctx, { category })) ctx.render(); },
-    });
-    row.dataset.id = category.id;
+  for (const top of tops) {
+    const handle = h('button', { type: 'button', class: 'drag-handle', 'aria-label': `Переместить «${top.name}»` }, icon('drag', 20));
+    const group = h('div', { class: 'cat-group' }, row(top, handle),
+      ordered.filter((c) => c.depth === 1 && c.parent_id === top.id).map((child) => {
+        const el = row(child, h('span', { class: 'sub-mark' }));
+        el.classList.add('sub');
+        return el;
+      }));
     handle.addEventListener('click', (event) => event.stopPropagation());
-    handle.addEventListener('pointerdown', (event) => startDrag(event, row, handle));
-    listEl.append(row);
+    handle.addEventListener('pointerdown', (event) => startDrag(event, group, handle));
+    listEl.append(group);
   }
 
-  // Перетаскивание: строка меняется местами с соседней, когда палец пересекает её середину.
-  function startDrag(event, row, handle) {
+  // Группа меняется местами с соседней, когда палец пересекает её середину.
+  function startDrag(event, group, handle) {
     event.preventDefault();
     event.stopPropagation();
     try { handle.setPointerCapture(event.pointerId); } catch { /* указатель уже отпущен */ }
-    row.classList.add('dragging');
-    const from = [...listEl.children].indexOf(row);
+    group.classList.add('dragging');
+    const from = [...listEl.children].indexOf(group);
     const move = (ev) => {
-      const prev = row.previousElementSibling;
-      const next = row.nextElementSibling;
+      const prev = group.previousElementSibling;
+      const next = group.nextElementSibling;
       const middle = (el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
-      if (prev && ev.clientY < middle(prev)) listEl.insertBefore(row, prev);
-      else if (next && ev.clientY > middle(next)) listEl.insertBefore(next, row);
+      if (prev && ev.clientY < middle(prev)) listEl.insertBefore(group, prev);
+      else if (next && ev.clientY > middle(next)) listEl.insertBefore(next, group);
     };
     const end = async () => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', end);
       handle.removeEventListener('pointercancel', end);
-      row.classList.remove('dragging');
-      const to = [...listEl.children].indexOf(row);
+      group.classList.remove('dragging');
+      const to = [...listEl.children].indexOf(group);
       if (to === from) return;
-      const moved = moveItem(list, from, to);
-      await db.putMany('categories', moved.filter((c) => !list.includes(c))); // только изменившиеся
+      const source = tops.map(({ depth, ...category }) => category);
+      await db.putMany('categories', moveItem(source, from, to).filter((c) => !source.includes(c))); // только изменившиеся
       ctx.render();
     };
     handle.addEventListener('pointermove', move);
@@ -126,8 +134,8 @@ export async function renderCategories(root, ctx) {
   clear(root).append(h('div', { class: 'screen' },
     screenHeader(ctx, 'Категории'),
     tabs,
-    list.length ? listEl : h('p', { class: 'empty', text: 'Категорий этого типа нет' }),
-    h('p', { class: 'note-text', text: 'Порядок меняется перетаскиванием за значок слева. Скрытые категории не предлагаются при вводе, но их операции остаются.' }),
+    ordered.length ? listEl : h('p', { class: 'empty', text: 'Категорий этого типа нет' }),
+    h('p', { class: 'note-text', text: 'Порядок меняется перетаскиванием за значок слева; подкатегории переезжают вместе с родителем. Чтобы сделать подкатегорию, откройте категорию и выберите «Родительская категория».' }),
     h('button', {
       type: 'button', class: 'btn-secondary', text: 'Новая категория',
       onClick: async () => { if (await editCategory(ctx, { type: state.catType })) ctx.render(); },
@@ -145,8 +153,8 @@ export async function renderAccounts(root, ctx) {
   clear(root).append(h('div', { class: 'screen' },
     screenHeader(ctx, 'Счета'),
     h('div', { class: 'list' }, accounts.map((account) => listItem({
-      iconName: account.icon || 'wallet', color: '#10B981', label: account.name,
-      tag: account.hidden ? 'скрыт' : null,
+      iconName: account.icon || 'wallet', color: account.color ?? '#10B981', label: account.name,
+      tag: account.hidden ? 'убран из списков' : account.exclude_from_total ? 'вне общего баланса' : null,
       right: formatMoney(balances.get(account.id), account.currency),
       onClick: async () => { if (await editAccount(ctx, { account })) ctx.render(); },
     }))),

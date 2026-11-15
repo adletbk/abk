@@ -1,23 +1,72 @@
 // Редакторы в листах: категория, счёт, ввод названия.
 import { h, clear, toast } from './dom.js';
 import { icon } from '../icons.js';
+import { ICON_GROUPS } from '../icons-data.js';
 import { openSheet, pickSheet, confirmSheet } from './sheet.js';
 import { uuid, plural, TYPE_LABELS } from '../model.js';
 import { CURRENCIES, amountToText, parseMoneyInput } from '../money.js';
-import { PALETTE, CATEGORY_ICONS, ACCOUNT_ICONS, usageCount, reassignCategory } from '../catalog.js';
-
-/** Сетка выбора (иконки или цвета). render(value) возвращает содержимое кнопки. */
-function choiceGrid({ className, values, get, set, render, label }) {
-  const grid = h('div', { class: className, role: 'group', 'aria-label': label });
-  const paint = () => clear(grid).append(...values.map((value) => h('button', {
-    type: 'button', 'aria-pressed': String(get() === value), 'aria-label': `${label}: ${value}`,
-    onClick: () => { set(value); paint(); },
-  }, render(value))));
-  paint();
-  return { el: grid, paint };
-}
+import { PALETTE, CATEGORY_ICONS, ACCOUNT_ICONS, usageCount, reassignCategory, validParents } from '../catalog.js';
 
 const nextOrder = (rows) => rows.reduce((max, row) => Math.max(max, row.order ?? -1), -1) + 1;
+// После отрисовки: в момент первого вызова лист ещё не в документе.
+const reveal = (el) => requestAnimationFrame(() => el?.scrollIntoView({ block: 'nearest', inline: 'center' }));
+
+/** Лента цветов с горизонтальной прокруткой. Цвет, которого нет в палитре, добавляется в начало. */
+function colorStrip({ get, set }) {
+  const strip = h('div', { class: 'color-strip', role: 'group', 'aria-label': 'Цвет' });
+  const colors = PALETTE.includes(get()) ? PALETTE : [get(), ...PALETTE];
+  const paint = () => {
+    clear(strip).append(...colors.map((color) => h('button', {
+      type: 'button', class: 'color-chip', 'aria-pressed': String(get() === color), 'aria-label': `Цвет ${color}`,
+      style: { '--c': color }, onClick: () => { set(color); paint(); },
+    })));
+    reveal(strip.querySelector('[aria-pressed="true"]'));
+  };
+  paint();
+  return strip;
+}
+
+/** Иконки по разделам с горизонтальной прокруткой. basic — привычные иконки приложения, они идут первым разделом. */
+function iconPicker({ get, set, basic }) {
+  const picker = h('div', { class: 'icon-picker', role: 'group', 'aria-label': 'Иконка' });
+  const groups = [{ name: 'Основные', icons: basic }, ...ICON_GROUPS];
+  const paint = () => {
+    clear(picker).append(...groups.map((group) => h('div', { class: 'icon-section' },
+      h('div', { class: 'icon-section-title', text: group.name }),
+      h('div', { class: 'icon-section-grid' }, group.icons.map((name) => h('button', {
+        type: 'button', 'aria-pressed': String(get() === name), 'aria-label': `Иконка ${name.replace(/^lu-/, '')}`,
+        onClick: () => { set(name); paint(); },
+      }, icon(name, 22)))))));
+    reveal(picker.querySelector('[aria-pressed="true"]'));
+  };
+  paint();
+  return picker;
+}
+
+/** Плашка с иконкой и поле названия в одной строке, как в шапке редактора. */
+function nameRow(draft, placeholder, label) {
+  const badge = h('span', { class: 'cat-badge' });
+  const input = h('input', {
+    class: 'name-input', type: 'text', value: draft.name, placeholder, maxlength: '30',
+    autocomplete: 'off', enterkeyhint: 'done', 'aria-label': label,
+  });
+  const paint = () => {
+    badge.style.setProperty('--c', draft.color);
+    clear(badge).append(icon(draft.icon, 24));
+  };
+  paint();
+  return { el: h('div', { class: 'name-row' }, badge, input), input, paint };
+}
+
+function switchRow({ label, sub, get, set }) {
+  const button = h('button', { type: 'button', class: 'switch', role: 'switch', 'aria-label': label });
+  const paint = () => button.setAttribute('aria-checked', String(get()));
+  button.addEventListener('click', () => { set(!get()); paint(); });
+  paint();
+  return h('div', { class: 'form-line' },
+    h('span', { class: 'form-line-main' }, h('span', { text: label }), sub && h('span', { class: 'form-line-sub', text: sub })),
+    button);
+}
 
 /** Ввод короткого текста. Возвращает строку или null. */
 export function promptSheet({ title, value = '', placeholder = '', submitLabel = 'Сохранить', maxlength = 40 }) {
@@ -44,62 +93,79 @@ export function promptSheet({ title, value = '', placeholder = '', submitLabel =
   });
 }
 
+// ---------- категория ----------
+
 /**
  * Создание или правка категории. Возвращает сохранённую категорию,
  * 'deleted' после удаления или null, если лист закрыли.
  */
-export function editCategory(ctx, { category = null, type = 'expense' } = {}) {
+export function editCategory(ctx, { category = null, type = 'expense', parentId = null } = {}) {
   const { db } = ctx;
   return new Promise((resolve) => {
     let result = null;
+    let all = [];
     const draft = category ? { ...category } : {
-      id: uuid(), name: '', icon: 'dots', color: PALETTE[0], type, order: null,
+      id: uuid(), name: '', icon: 'lu-shapes', color: PALETTE[9], type, parent_id: parentId, order: null,
       hidden: false, deleted: false, deleted_at: null,
     };
+    const head = nameRow(draft, 'Название', 'Название категории');
 
-    const name = h('input', {
-      class: 'field-input', type: 'text', value: draft.name, placeholder: 'Название', maxlength: '30',
-      autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Название категории',
-    });
+    const parentButton = h('button', { type: 'button', class: 'parent-btn', onClick: pickParent });
+    const paintParent = () => {
+      const parent = all.find((c) => c.id === draft.parent_id && !c.deleted);
+      parentButton.textContent = parent ? `Входит в «${parent.name}»` : '+ Родительская категория';
+      parentButton.classList.toggle('set', Boolean(parent));
+      typeSeg.hidden = Boolean(category) || Boolean(parent); // тип подкатегории задаёт родитель
+    };
+    async function pickParent() {
+      const options = validParents(draft, all);
+      if (options.length === 0) {
+        toast(all.some((c) => c.parent_id === draft.id && !c.deleted)
+          ? 'У этой категории есть подкатегории: вложить её нельзя' : 'Нет категорий, в которые можно вложить эту');
+        return;
+      }
+      const picked = await pickSheet({
+        title: 'Родительская категория', selected: draft.parent_id ?? null,
+        items: [{ value: null, label: 'Без родителя', icon: 'layers' },
+          ...options.map((c) => ({ value: c.id, label: c.name, icon: c.icon, color: c.color }))],
+      });
+      if (!picked) return;
+      draft.parent_id = picked.value;
+      paintParent();
+    }
+
     const typeSeg = h('div', { class: 'seg-plain', role: 'group', 'aria-label': 'Тип категории' });
     const paintType = () => clear(typeSeg).append(...['expense', 'income'].map((t) => h('button', {
       type: 'button', text: TYPE_LABELS[t], 'aria-pressed': String(draft.type === t),
-      onClick: () => { draft.type = t; paintType(); },
+      onClick: () => { draft.type = t; draft.parent_id = null; paintType(); paintParent(); },
     })));
     paintType();
 
-    const icons = choiceGrid({
-      className: 'icon-grid', values: CATEGORY_ICONS, label: 'Иконка',
-      get: () => draft.icon, set: (v) => { draft.icon = v; },
-      render: (v) => icon(v, 22),
-    });
-    const colors = choiceGrid({
-      className: 'swatches', values: PALETTE, label: 'Цвет',
-      get: () => draft.color, set: (v) => { draft.color = v; icons.el.style.setProperty('--c', v); },
-      render: (v) => h('span', { class: 'swatch', style: { '--c': v } }),
-    });
-    icons.el.style.setProperty('--c', draft.color);
-
     async function save(patch = {}) {
-      const text = name.value.trim();
+      const text = head.input.value.trim();
       if (!text) { toast('Введите название'); return; }
       Object.assign(draft, patch, { name: text, updated_at: Date.now() });
-      if (draft.order == null) {
-        draft.order = nextOrder((await db.getAll('categories')).filter((c) => c.type === draft.type));
-      }
+      const siblings = (await db.getAll('categories')).filter((c) => c.type === draft.type && (c.parent_id ?? null) === (draft.parent_id ?? null));
+      const moved = category && (category.parent_id ?? null) !== (draft.parent_id ?? null);
+      if (draft.order == null || moved) draft.order = nextOrder(siblings.filter((c) => c.id !== draft.id));
       await db.put('categories', draft);
       result = draft;
       close();
     }
     async function remove() {
+      if (all.some((c) => c.parent_id === category.id && !c.deleted)) {
+        toast('Сначала перенесите или удалите подкатегории', { duration: 4000 });
+        return;
+      }
       if (await deleteCategoryFlow(ctx, category)) { result = 'deleted'; close(); }
     }
 
     const content = h('div', { class: 'form' },
-      name,
-      !category && typeSeg,
-      h('div', { class: 'field-label', text: 'Иконка' }), icons.el,
-      h('div', { class: 'field-label', text: 'Цвет' }), colors.el,
+      parentButton,
+      head.el,
+      typeSeg,
+      colorStrip({ get: () => draft.color, set: (v) => { draft.color = v; head.paint(); } }),
+      iconPicker({ get: () => draft.icon, set: (v) => { draft.icon = v; head.paint(); }, basic: CATEGORY_ICONS }),
       h('button', { type: 'button', class: 'btn-primary', text: 'Сохранить', onClick: () => save() }),
       category && h('div', { class: 'form-row' },
         h('button', {
@@ -108,8 +174,10 @@ export function editCategory(ctx, { category = null, type = 'expense' } = {}) {
         }),
         h('button', { type: 'button', class: 'btn-secondary btn-danger', text: 'Удалить', onClick: remove })));
     const close = openSheet({
-      title: category ? 'Категория' : 'Новая категория', content, onClose: () => resolve(result),
+      title: category ? 'Категория' : 'Новая категория', content, tall: true, onClose: () => resolve(result),
     });
+    db.getAll('categories').then((rows) => { all = rows; paintParent(); });
+    paintParent();
   });
 }
 
@@ -154,43 +222,44 @@ async function deleteCategoryFlow(ctx, category) {
   return false;
 }
 
+// ---------- счёт ----------
+
 /** Создание или правка счёта. Возвращает счёт, 'deleted' или null. */
 export function editAccount(ctx, { account = null } = {}) {
   const { db } = ctx;
   return new Promise((resolve) => {
     let result = null;
-    const draft = account ? { ...account } : {
-      id: uuid(), name: '', icon: 'wallet', currency: 'KZT', initial_balance: 0, order: null,
-      hidden: false, deleted: false, deleted_at: null,
+    const draft = account ? { color: '#10B981', ...account } : {
+      id: uuid(), name: '', icon: 'wallet', color: PALETTE[5], currency: 'KZT', initial_balance: 0, order: null,
+      exclude_from_total: false, hint: '', hidden: false, deleted: false, deleted_at: null,
     };
-    const name = h('input', {
-      class: 'field-input', type: 'text', value: draft.name, placeholder: 'Название', maxlength: '30',
-      autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Название счёта',
-    });
+    const head = nameRow(draft, 'Название', 'Название счёта');
     const balance = h('input', {
-      class: 'field-input num', type: 'text', inputmode: 'decimal', placeholder: '0',
+      class: 'line-input num', type: 'text', inputmode: 'decimal', placeholder: '0',
       value: draft.initial_balance < 0 ? `-${amountToText(-draft.initial_balance)}` : amountToText(draft.initial_balance),
       autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Начальный остаток',
     });
     const hint = h('input', {
-      class: 'field-input', type: 'text', value: draft.hint ?? '', placeholder: 'например, 1234', maxlength: '30',
+      class: 'line-input', type: 'text', value: draft.hint ?? '', placeholder: 'например, 1234', maxlength: '30',
       autocomplete: 'off', autocapitalize: 'off', 'aria-label': 'Подсказка для автоматических трат',
     });
-    const icons = choiceGrid({
-      className: 'icon-grid', values: ACCOUNT_ICONS, label: 'Иконка',
-      get: () => draft.icon, set: (v) => { draft.icon = v; }, render: (v) => icon(v, 22),
-    });
-    const currency = choiceGrid({
-      className: 'seg-plain', values: Object.keys(CURRENCIES), label: 'Валюта',
-      get: () => draft.currency, set: (v) => { draft.currency = v; },
-      render: (v) => `${CURRENCIES[v].symbol} ${v}`,
-    });
+    const currencyButton = h('button', { type: 'button', class: 'line-value', onClick: pickCurrency });
+    const paintCurrency = () => { currencyButton.textContent = draft.currency; };
+    async function pickCurrency() {
+      if (account) { toast('Валюту счёта с операциями менять нельзя: создайте новый счёт'); return; }
+      const picked = await pickSheet({
+        title: 'Валюта счёта', selected: draft.currency,
+        items: Object.entries(CURRENCIES).map(([code, c]) => ({ value: code, label: `${c.symbol}  ${c.name}`, right: code })),
+      });
+      if (picked) { draft.currency = picked.value; paintCurrency(); }
+    }
+    paintCurrency();
 
     async function visibleOthers() {
       return (await db.getAll('accounts')).filter((a) => !a.deleted && !a.hidden && a.id !== draft.id).length;
     }
     async function save(patch = {}) {
-      const text = name.value.trim();
+      const text = head.input.value.trim();
       const initial = parseMoneyInput(balance.value);
       if (!text) { toast('Введите название'); return; }
       if (initial === null) { toast('Начальный остаток: введите число'); return; }
@@ -216,20 +285,25 @@ export function editAccount(ctx, { account = null } = {}) {
     }
 
     const content = h('div', { class: 'form' },
-      name,
-      h('div', { class: 'field-label', text: 'Начальный остаток' }), balance,
-      h('p', { class: 'field-hint', text: 'Хранится только на этом устройстве и в JSON-бэкапе. В Google Таблицу не отправляется.' }),
-      h('div', { class: 'field-label', text: 'Подсказка для автоматических трат' }), hint,
-      h('p', { class: 'field-hint', text: 'Текст, по которому счёт узнаётся в уведомлении или в данных Apple Pay: обычно последние цифры карты. Хранится только на устройстве.' }),
-      !account && h('div', { class: 'field-label', text: 'Валюта' }), !account && currency.el,
-      h('div', { class: 'field-label', text: 'Иконка' }), icons.el,
+      head.el,
+      colorStrip({ get: () => draft.color, set: (v) => { draft.color = v; head.paint(); } }),
+      iconPicker({ get: () => draft.icon, set: (v) => { draft.icon = v; head.paint(); }, basic: ACCOUNT_ICONS }),
+      h('div', { class: 'form-card' },
+        h('label', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Начальный остаток' }), balance),
+        h('div', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Валюта' }), currencyButton),
+        switchRow({
+          label: 'Скрыть из общего баланса', sub: 'Счёт остаётся в списке, но не входит в «Все счета»',
+          get: () => Boolean(draft.exclude_from_total), set: (v) => { draft.exclude_from_total = v; },
+        }),
+        h('label', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Подсказка для автотрат' }), hint)),
+      h('p', { class: 'field-hint', text: 'Подсказка — текст, по которому счёт узнаётся в уведомлении: обычно последние цифры карты. Начальный остаток, цвет и подсказка хранятся только на устройстве и в JSON-бэкапе.' }),
       h('button', { type: 'button', class: 'btn-primary', text: 'Сохранить', onClick: () => save() }),
       account && h('div', { class: 'form-row' },
         h('button', {
-          type: 'button', class: 'btn-secondary', text: account.hidden ? 'Показать' : 'Скрыть',
+          type: 'button', class: 'btn-secondary', text: account.hidden ? 'Вернуть в списки' : 'Убрать из списков',
           onClick: () => save({ hidden: !account.hidden }),
         }),
         h('button', { type: 'button', class: 'btn-secondary btn-danger', text: 'Удалить', onClick: remove })));
-    const close = openSheet({ title: account ? 'Счёт' : 'Новый счёт', content, onClose: () => resolve(result) });
+    const close = openSheet({ title: account ? 'Счёт' : 'Новый счёт', content, tall: true, onClose: () => resolve(result) });
   });
 }
