@@ -7,19 +7,22 @@ const OUT = fileURLToPath(new URL('../icons/', import.meta.url));
 const BG = [0, 0, 0];
 const FG = [0x10, 0xb9, 0x81];
 
-// Три столбца диаграммы в единичном квадрате: [x, y, ширина, высота]
-const BARS = [
-  [0.22, 0.54, 0.15, 0.22],
-  [0.425, 0.40, 0.15, 0.36],
-  [0.63, 0.24, 0.15, 0.52],
+// Монета со знаком тенге в единичном квадрате: кольцо и три штриха со скруглёнными концами.
+const RING = { r: 0.29, half: 0.035 };
+const STROKES = [
+  [0.37, 0.38, 0.63, 0.38],
+  [0.37, 0.485, 0.63, 0.485],
+  [0.5, 0.485, 0.5, 0.67],
 ];
-const RADIUS = 0.045;
+const HALF = 0.0325;
 
-function inBars(u, v) {
-  for (const [x, y, w, h] of BARS) {
-    const dx = Math.max(x + RADIUS - u, 0, u - (x + w - RADIUS));
-    const dy = Math.max(y + RADIUS - v, 0, v - (y + h - RADIUS));
-    if (u >= x && u <= x + w && v >= y && v <= y + h && dx * dx + dy * dy <= RADIUS * RADIUS) return true;
+function inMark(u, v) {
+  if (Math.abs(Math.hypot(u - 0.5, v - 0.5) - RING.r) <= RING.half) return true;
+  for (const [x1, y1, x2, y2] of STROKES) {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const t = Math.max(0, Math.min(1, ((u - x1) * dx + (v - y1) * dy) / (dx * dx + dy * dy)));
+    if (Math.hypot(u - x1 - t * dx, v - y1 - t * dy) <= HALF) return true;
   }
   return false;
 }
@@ -55,7 +58,7 @@ function png(size, scale = 1) {
         for (let sx = 0; sx < SS; sx++) {
           const u = ((x + (sx + 0.5) / SS) / size - 0.5) / scale + 0.5;
           const v = ((y + (sy + 0.5) / SS) / size - 0.5) / scale + 0.5;
-          if (inBars(u, v)) hits++;
+          if (inMark(u, v)) hits++;
         }
       }
       const a = hits / (SS * SS);

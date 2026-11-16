@@ -37,7 +37,7 @@ function iconPicker({ get, set, basic }) {
     clear(picker).append(...groups.map((group) => h('div', { class: 'icon-section' },
       h('div', { class: 'icon-section-title', text: group.name }),
       h('div', { class: 'icon-section-grid' }, group.icons.map((name) => h('button', {
-        type: 'button', 'aria-pressed': String(get() === name), 'aria-label': `Иконка ${name.replace(/^lu-/, '')}`,
+        type: 'button', 'aria-pressed': String(get() === name), 'aria-label': `Иконка ${name.replace(/^(lu|br)-/, '')}`,
         onClick: () => { set(name); paint(); },
       }, icon(name, 22)))))));
     reveal(picker.querySelector('[aria-pressed="true"]'));
