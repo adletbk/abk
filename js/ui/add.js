@@ -11,6 +11,7 @@ import { templateFromTransaction, fieldsFromTemplate, orderedCategories } from '
 import { learnMerchant } from '../inbox.js';
 import { eventDate } from '../parser.js';
 import { revealDay } from '../period.js';
+import { markPlanned } from '../planned.js';
 import {
   TYPE_LABELS, dayKey, dayShort, localIso, newTransaction, todayKey, validateTransaction,
 } from '../model.js';
@@ -19,7 +20,7 @@ const TYPE_ORDER = ['income', 'expense', 'transfer'];
 const TYPE_ICON = { income: 'arrow-in', expense: 'arrow-out', transfer: 'transfer' };
 
 
-export async function renderAdd(root, ctx, { id = null, templateId = null, inboxId = null } = {}) {
+export async function renderAdd(root, ctx, { id = null, templateId = null, inboxId = null, planRef = null } = {}) {
   const { db, state } = ctx;
   const [allCategories, allAccounts, lastAccountId] = await Promise.all([
     db.getAll('categories'), db.getAll('accounts'), db.getSetting('last_account_id', null),
@@ -29,6 +30,11 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
   const template = !id && templateId ? await db.get('templates', templateId) : null;
   // Операция вручную из неразобранной записи: текст уходит в заметку, время берётся из записи.
   const inboxItem = !id && inboxId ? await db.get('inbox', inboxId) : null;
+
+  // Оплата планового платежа из календаря: ссылка «id_дата», поля берутся из платежа.
+  const planCut = !id && planRef ? planRef.lastIndexOf('_') : -1;
+  const planDay = planCut > 0 ? planRef.slice(planCut + 1) : null;
+  const plan = planCut > 0 ? await db.get('planned', planRef.slice(0, planCut)) : null;
 
   const accounts = allAccounts.filter((a) => !a.deleted && !a.hidden).sort((a, b) => a.order - b.order);
   const accountsById = new Map(allAccounts.map((a) => [a.id, a]));
@@ -66,6 +72,18 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
       currency: t.currency ?? form.currency,
       note: t.note ?? '',
       categoryId: categories.some((c) => c.id === t.category_id) ? t.category_id : null,
+    });
+  }
+
+  if (plan && !plan.deleted) {
+    const accountId = accounts.some((a) => a.id === plan.account_id) ? plan.account_id : form.accountId;
+    Object.assign(form, {
+      type: 'expense',
+      text: amountToText(plan.amount ?? 0),
+      accountId,
+      currency: accountsById.get(accountId)?.currency ?? plan.currency ?? form.currency,
+      note: [plan.name, plan.note].filter(Boolean).join(' · ').slice(0, 200),
+      categoryId: categories.some((c) => c.id === plan.category_id && c.type === 'expense') ? plan.category_id : null,
     });
   }
 
@@ -225,6 +243,11 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
       await db.setSetting('last_account_id', tx.account_id);
       // Запоминаем категорию получателя: следующая такая операция получит её сама.
       if (existing?.merchant && tx.category_id) await learnMerchant(db, existing.merchant, tx.category_id);
+      if (plan && !plan.deleted && /^\d{4}-\d{2}-\d{2}$/.test(planDay)) {
+        // Свежая копия: платёж могли изменить, пока был открыт этот экран.
+        const fresh = await db.get('planned', plan.id) ?? plan;
+        await db.put('planned', markPlanned(fresh, planDay, 'paid', { txId: tx.id }));
+      }
       if (inboxItem) await db.put('inbox', { ...inboxItem, status: 'done', reason: null, tx_id: tx.id, updated_at: Date.now() });
       state.period = revealDay(state.period, dayKey(tx.date), todayKey());
       ctx.back();

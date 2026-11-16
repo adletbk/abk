@@ -24,6 +24,10 @@ export const MIGRATIONS = [
     }
     db.createObjectStore('settings', { keyPath: 'key' });
   },
+  // v2: плановые платежи (календарь платежей). Только на устройстве, в таблицу не уходят.
+  (db) => {
+    db.createObjectStore('planned', { keyPath: 'id' }).createIndex('updated_at', 'updated_at');
+  },
 ];
 
 const encode = (store, value) => value;

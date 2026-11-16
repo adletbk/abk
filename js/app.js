@@ -13,6 +13,7 @@ import { renderReview, renderRules } from './ui/review.js';
 import { processInbox } from './inbox.js';
 import { renderImport } from './ui/import.js';
 import { renderInsights, renderDay } from './ui/insights.js';
+import { renderPlanned } from './ui/planned.js';
 
 const SCREENS = {
   analytics: renderAnalytics,
@@ -27,6 +28,7 @@ const SCREENS = {
   rules: renderRules,
   import: renderImport,
   insights: renderInsights,
+  planned: renderPlanned,
 };
 
 const root = document.getElementById('app');
@@ -59,7 +61,7 @@ async function main() {
     /** auto: false — не планировать фоновую синхронизацию (рендер вызван самой синхронизацией). */
     async render({ auto = true } = {}) {
       const seq = ++renderSeq;
-      const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?(t|inbox)=([\w-]+))?$/);
+      const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?(t|inbox|plan)=([\w-]+))?$/);
       const screen = SCREENS[location.hash.slice(2)];
       const day = location.hash.match(/^#\/day\/(\d{4}-\d{2}-\d{2})$/);
       const target = document.createElement('div');
@@ -68,6 +70,7 @@ async function main() {
           id: add[1] ?? null,
           templateId: add[2] === 't' ? add[3] : null,
           inboxId: add[2] === 'inbox' ? add[3] : null,
+          planRef: add[2] === 'plan' ? add[3] : null,
         });
       }
       else if (day) await renderDay(target, ctx, day[1]);

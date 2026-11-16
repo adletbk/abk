@@ -15,7 +15,7 @@ const nextOrder = (rows) => rows.reduce((max, row) => Math.max(max, row.order ??
 const reveal = (el) => requestAnimationFrame(() => el?.scrollIntoView({ block: 'nearest', inline: 'center' }));
 
 /** Лента цветов с горизонтальной прокруткой. Цвет, которого нет в палитре, добавляется в начало. */
-function colorStrip({ get, set }) {
+export function colorStrip({ get, set }) {
   const strip = h('div', { class: 'color-strip', role: 'group', 'aria-label': 'Цвет' });
   const colors = PALETTE.includes(get()) ? PALETTE : [get(), ...PALETTE];
   const paint = () => {
@@ -30,7 +30,7 @@ function colorStrip({ get, set }) {
 }
 
 /** Иконки по разделам с горизонтальной прокруткой. basic — привычные иконки приложения, они идут первым разделом. */
-function iconPicker({ get, set, basic }) {
+export function iconPicker({ get, set, basic }) {
   const picker = h('div', { class: 'icon-picker', role: 'group', 'aria-label': 'Иконка' });
   const groups = [{ name: 'Основные', icons: basic }, ...ICON_GROUPS];
   const paint = () => {

@@ -4,7 +4,7 @@ import { SOURCE_LABELS, TYPE_LABELS, dayKey } from './model.js';
 export const BACKUP_FORMAT = 'finance-backup';
 export const BACKUP_VERSION = 1;
 
-const STORES = ['transactions', 'categories', 'accounts', 'templates', 'inbox', 'rules', 'settings'];
+const STORES = ['transactions', 'categories', 'accounts', 'templates', 'inbox', 'rules', 'planned', 'settings'];
 const keyOf = (store) => (store === 'settings' ? 'key' : 'id');
 
 /** Снимок всех данных устройства, включая начальные остатки и настройки. */

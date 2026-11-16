@@ -7,10 +7,10 @@ import { seedIfEmpty, clearDemo } from '../js/seed.js';
 const fresh = () => openDb({ indexedDB: new IDBFactory() });
 const tx = (id, extra = {}) => ({ id, date: '2026-11-01T10:00:00', amount: 100, deleted: false, ...extra });
 
-test('схема v1: все хранилища созданы', async () => {
+test('схема: все хранилища созданы', async () => {
   const db = await fresh();
   assert.deepEqual(db.storeNames(), [
-    'accounts', 'categories', 'inbox', 'rules', 'settings', 'templates', 'transactions',
+    'accounts', 'categories', 'inbox', 'planned', 'rules', 'settings', 'templates', 'transactions',
   ]);
   db.close();
 });

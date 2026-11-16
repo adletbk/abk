@@ -24,7 +24,7 @@ test('exportBackup: формат, версия и все хранилища', as
   assert.equal(backup.version, 1);
   assert.equal(backup.exported_at, new Date(NOW).toISOString());
   assert.deepEqual(Object.keys(backup.data).sort(),
-    ['accounts', 'categories', 'inbox', 'rules', 'settings', 'templates', 'transactions']);
+    ['accounts', 'categories', 'inbox', 'planned', 'rules', 'settings', 'templates', 'transactions']);
   assert.equal(backup.data.transactions.length, 25);
   // начальные остатки входят в бэкап: в таблицу они не уходят
   assert.equal(backup.data.accounts.find((a) => a.id === 'acc-card').initial_balance, 12345600);

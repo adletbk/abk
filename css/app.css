@@ -1062,3 +1062,43 @@ svg.icon { display: block; flex: none; }
 .analytics-controls .period-title { min-width: 0; padding: 0 2px; }
 .adjust-row { align-items: stretch; }
 .adjust-row .sign-btn { flex: none; width: 52px; height: auto; border-radius: 14px; background: var(--raised); }
+
+/* ---------- Календарь платежей ---------- */
+.plan-period { display: flex; justify-content: center; }
+.plan-summary { display: flex; gap: 8px; padding: 14px 16px; border-radius: var(--r-card); background: var(--card); }
+.plan-stat { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.plan-stat:last-child { flex: none; }
+.plan-stat-label { color: var(--text-2); font-size: 12px; }
+.plan-stat-value { font-size: 16px; font-weight: 600; white-space: nowrap; }
+.plan-stat-value.late, .group-title.late { color: var(--red); }
+.plan-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px 2px; padding: 10px 6px; border-radius: var(--r-card); background: var(--card); }
+.plan-wd { padding-bottom: 4px; color: var(--inactive); font-size: 11px; text-align: center; }
+.plan-day { display: flex; flex-direction: column; align-items: center; gap: 3px; min-height: 46px; padding: 6px 0 0; border-radius: 12px; color: var(--text); font-size: 15px; font-variant-numeric: tabular-nums; }
+.plan-day.past { color: var(--text-2); }
+.plan-day.today { box-shadow: inset 0 0 0 1.5px var(--income); color: var(--text); }
+.plan-day.sel { background: var(--raised); }
+.plan-dots { display: flex; align-items: center; gap: 3px; height: 8px; }
+.plan-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.plan-dot.paid { opacity: 0.35; }
+.plan-dot.late { box-shadow: 0 0 0 1.5px var(--red); }
+.plan-more { color: var(--text-2); font-size: 10px; line-height: 8px; }
+.plan-list { border-radius: var(--r-card); background: var(--card); overflow: hidden; }
+.plan-row { display: flex; align-items: center; gap: 10px; padding-right: 12px; }
+.plan-row + .plan-row { border-top: 1px solid var(--raised); }
+.plan-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 0 8px 12px; color: var(--text); text-align: left; }
+.plan-main .cat-badge { flex: none; width: 40px; height: 40px; }
+.plan-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.plan-name { font-size: 16px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plan-sub { color: var(--text-2); font-size: 13px; line-height: 1.25; }
+.plan-row.late .plan-sub { color: var(--red); }
+.plan-amount { flex: none; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.plan-row.paid .plan-name, .plan-row.paid .plan-amount, .plan-row.skipped .plan-name, .plan-row.skipped .plan-amount { color: var(--text-2); }
+.plan-row.skipped .plan-name { text-decoration: line-through; }
+.plan-pay { flex: none; min-height: 34px; padding: 0 12px; border-radius: var(--r-pill); background: var(--income); color: #00130C; font-size: 13px; font-weight: 600; }
+.plan-done { flex: none; display: inline-flex; justify-content: center; width: 34px; color: var(--income); }
+.plan-row.skipped .plan-done { color: var(--inactive); }
+.plan-empty { display: flex; flex-direction: column; gap: 12px; }
+.plan-seg { display: flex; gap: 2px; padding: 3px; border-radius: 12px; background: var(--raised); }
+.plan-seg button { flex: 1; min-height: 36px; border-radius: 9px; color: var(--text-2); font-size: 13px; }
+.plan-seg button[aria-pressed="true"] { background: #404040; color: var(--text); }
+.plan-date { flex: none; width: auto; max-width: 60%; color-scheme: dark; }
