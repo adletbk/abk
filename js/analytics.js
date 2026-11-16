@@ -1,6 +1,7 @@
 // Аналитика: только факт доходов и расходов, без бюджетов и лимитов. Чистые функции.
 import { shiftMonth, plural } from './model.js';
 import { rangeOf, spanDays, diffDays, addDays } from './period.js';
+import { isAdjustment } from './adjust.js';
 import { formatMoney } from './money.js';
 
 export function daysInMonth(month) {
@@ -19,7 +20,7 @@ export function elapsedDays(month, today) {
 /** Доходы и расходы месяца в основной валюте; переводы и удалённые не входят. */
 function pick(txs, month, { currency = 'KZT', accountId = null, excludeAccounts = null } = {}) {
   const { from, to } = rangeOf(month);
-  return txs.filter((tx) => !tx.deleted && tx.currency === currency && tx.type !== 'transfer'
+  return txs.filter((tx) => !tx.deleted && tx.currency === currency && tx.type !== 'transfer' && !isAdjustment(tx)
     && tx.date.slice(0, 10) >= from && tx.date.slice(0, 10) <= to
     && (accountId ? tx.account_id === accountId : !excludeAccounts?.has(tx.account_id)));
 }

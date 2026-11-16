@@ -776,7 +776,12 @@ svg.icon { display: block; flex: none; }
 @media (prefers-reduced-motion: reduce) {
   .syncing .dock-sync svg { animation: none; opacity: 0.5; }
 }
-.list .item-label { white-space: normal; overflow-wrap: anywhere; }
+.list .item-label { white-space: normal; overflow-wrap: break-word; }
+.list .item-main { min-width: 72px; }
+.item-tag, .item-right, .item-mark, .item-chevron { flex: none; }
+.item-mark { display: inline-flex; color: var(--text-2); }
+.sign-btn { flex: none; width: 36px; height: 36px; border-radius: 50%; background: var(--card); color: var(--text); font-size: 18px; font-weight: 600; }
+.form-line .sign-btn + .line-input { padding-left: 8px; }
 
 /* ---------- Оболочка до загрузки скриптов ---------- */
 
@@ -1055,3 +1060,5 @@ svg.icon { display: block; flex: none; }
 .analytics-controls { flex-wrap: nowrap; }
 .analytics-controls .seg button { min-width: 44px; padding: 0 12px; }
 .analytics-controls .period-title { min-width: 0; padding: 0 2px; }
+.adjust-row { align-items: stretch; }
+.adjust-row .sign-btn { flex: none; width: 52px; height: auto; border-radius: 14px; background: var(--raised); }

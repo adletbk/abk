@@ -9,6 +9,7 @@ import { TYPE_LABELS } from '../model.js';
 import { accountBalances } from '../selectors.js';
 import { moveItem, orderedCategories } from '../catalog.js';
 import { reviewCounts } from '../inbox.js';
+import { isAdjustCategory } from '../adjust.js';
 
 const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
 
@@ -70,7 +71,7 @@ export async function renderSettings(root, ctx) {
 export async function renderCategories(root, ctx) {
   const { db, state } = ctx;
   state.catType ??= 'expense';
-  const all = (await db.getAll('categories')).filter((c) => !c.deleted && c.type === state.catType);
+  const all = (await db.getAll('categories')).filter((c) => !c.deleted && c.type === state.catType && !isAdjustCategory(c));
   const ordered = orderedCategories(all);
   const tops = ordered.filter((c) => c.depth === 0);
 
@@ -154,11 +155,13 @@ export async function renderAccounts(root, ctx) {
     screenHeader(ctx, 'Счета'),
     h('div', { class: 'list' }, accounts.map((account) => listItem({
       iconName: account.icon || 'wallet', color: account.color ?? '#10B981', label: account.name,
-      tag: account.hidden ? 'убран из списков' : account.exclude_from_total ? 'вне общего баланса' : account.savings ? 'сбережения' : null,
+      tag: account.hidden ? 'скрыт' : null,
+      mark: account.hidden ? null : account.exclude_from_total ? { icon: 'eye-off', label: 'Вне общего баланса' }
+        : account.savings ? { icon: 'lu-piggy-bank', label: 'Сбережения' } : null,
       right: formatMoney(balances.get(account.id), account.currency),
       onClick: async () => { if (await editAccount(ctx, { account })) ctx.render(); },
     }))),
-    h('p', { class: 'note-text', text: 'Остаток = начальный остаток + доходы − расходы ± переводы. Счёт с операциями нельзя удалить, только скрыть.' }),
+    h('p', { class: 'note-text', text: 'Остаток = начальный остаток + доходы − расходы ± переводы и корректировки. Перечёркнутый глаз — счёт вне общего баланса, копилка — сбережения. Счёт с операциями нельзя удалить, только скрыть.' }),
     h('button', {
       type: 'button', class: 'btn-secondary', text: 'Новый счёт',
       onClick: async () => { if (await editAccount(ctx)) ctx.render(); },

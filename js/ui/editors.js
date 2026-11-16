@@ -5,6 +5,9 @@ import { ICON_GROUPS } from '../icons-data.js';
 import { openSheet, pickSheet, confirmSheet } from './sheet.js';
 import { uuid, plural, TYPE_LABELS } from '../model.js';
 import { CURRENCIES, amountToText, parseMoneyInput } from '../money.js';
+import { accountBalances } from '../selectors.js';
+import { adjustCategory, adjustmentFor } from '../adjust.js';
+import { formatMoney } from '../money.js';
 import { PALETTE, CATEGORY_ICONS, ACCOUNT_ICONS, usageCount, reassignCategory, validParents } from '../catalog.js';
 
 const nextOrder = (rows) => rows.reduce((max, row) => Math.max(max, row.order ?? -1), -1) + 1;
@@ -67,6 +70,19 @@ function switchRow({ label, sub, get, set }) {
     h('span', { class: 'form-line-main' }, h('span', { text: label }), sub && h('span', { class: 'form-line-sub', text: sub })),
     button);
 }
+
+/** Кнопка «±»: на цифровой клавиатуре iPhone нет минуса, знак меняется ей. */
+function signButton(input) {
+  return h('button', {
+    type: 'button', class: 'sign-btn', text: '±', 'aria-label': 'Сменить знак',
+    onClick: () => {
+      const text = input.value.trim().replace('−', '-');
+      input.value = text.startsWith('-') ? text.slice(1) : `-${text}`;
+      input.focus();
+    },
+  });
+}
+const signedText = (minor) => (minor < 0 ? `-${amountToText(-minor)}` : amountToText(minor));
 
 /** Ввод короткого текста. Возвращает строку или null. */
 export function promptSheet({ title, value = '', placeholder = '', submitLabel = 'Сохранить', maxlength = 40 }) {
@@ -236,7 +252,7 @@ export function editAccount(ctx, { account = null } = {}) {
     const head = nameRow(draft, 'Название', 'Название счёта');
     const balance = h('input', {
       class: 'line-input num', type: 'text', inputmode: 'decimal', placeholder: '0',
-      value: draft.initial_balance < 0 ? `-${amountToText(-draft.initial_balance)}` : amountToText(draft.initial_balance),
+      value: signedText(draft.initial_balance),
       autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Начальный остаток',
     });
     const hint = h('input', {
@@ -254,6 +270,42 @@ export function editAccount(ctx, { account = null } = {}) {
       if (picked) { draft.currency = picked.value; paintCurrency(); }
     }
     paintCurrency();
+
+    // Текущий остаток: если он расходится с банком, создаётся операция «Корректировка счёта» на разницу.
+    const currentButton = h('button', { type: 'button', class: 'line-value num', onClick: adjust });
+    let current = 0;
+    async function paintCurrent() {
+      const [accounts, txs] = await Promise.all([db.getAll('accounts'), db.getAll('transactions')]);
+      current = accountBalances(accounts, txs).get(draft.id) ?? 0;
+      currentButton.textContent = formatMoney(current, draft.currency);
+    }
+    if (account) paintCurrent();
+    function adjust() {
+      const input = h('input', {
+        class: 'field-input num', type: 'text', inputmode: 'decimal', value: signedText(current), placeholder: '0',
+        autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Остаток на самом деле',
+      });
+      const apply = async () => {
+        const target = parseMoneyInput(input.value);
+        if (target === null) { toast('Введите число'); return; }
+        const tx = adjustmentFor(draft, current, target);
+        if (!tx) { toast('Остаток уже такой'); return; }
+        await db.put('categories', { ...adjustCategory(tx.type), ...(await db.get('categories', tx.category_id) ?? {}) });
+        await db.put('transactions', tx);
+        closeAdjust();
+        await paintCurrent();
+        result = result ?? account; // список счетов перерисуется после закрытия
+        toast(`Корректировка: ${formatMoney(tx.type === 'income' ? tx.amount : -tx.amount, tx.currency, { sign: true })}`);
+      };
+      const closeAdjust = openSheet({
+        title: 'Корректировка остатка',
+        content: h('div', { class: 'form' },
+          h('p', { class: 'sheet-text', text: `Сейчас в приложении: ${formatMoney(current, draft.currency)}. Введите, сколько на счёте на самом деле. Разница запишется операцией «Корректировка счёта» и не попадёт в доходы и расходы.` }),
+          h('div', { class: 'form-row adjust-row' }, signButton(input), input),
+          h('button', { type: 'button', class: 'btn-primary', text: 'Скорректировать', onClick: apply })),
+      });
+      input.focus();
+    }
 
     async function visibleOthers() {
       return (await db.getAll('accounts')).filter((a) => !a.deleted && !a.hidden && a.id !== draft.id).length;
@@ -289,7 +341,8 @@ export function editAccount(ctx, { account = null } = {}) {
       colorStrip({ get: () => draft.color, set: (v) => { draft.color = v; head.paint(); } }),
       iconPicker({ get: () => draft.icon, set: (v) => { draft.icon = v; head.paint(); }, basic: ACCOUNT_ICONS }),
       h('div', { class: 'form-card' },
-        h('label', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Начальный остаток' }), balance),
+        h('div', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Начальный остаток' }), signButton(balance), balance),
+        account && h('div', { class: 'form-line' }, h('span', { class: 'form-line-main' }, h('span', { text: 'Текущий остаток' }), h('span', { class: 'form-line-sub', text: 'Нажмите на сумму, чтобы скорректировать' })), currentButton),
         h('div', { class: 'form-line' }, h('span', { class: 'form-line-main', text: 'Валюта' }), currencyButton),
         switchRow({
           label: 'Скрыть из общего баланса', sub: 'Счёт остаётся в списке, но не входит в «Все счета»',

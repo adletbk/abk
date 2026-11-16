@@ -1,6 +1,7 @@
 // Выборки для экранов: итоги месяца, список по дням, остатки. Чистые функции.
 import { dayKey } from './model.js';
 import { rangeOf } from './period.js';
+import { isAdjustment } from './adjust.js';
 
 const signed = (tx) => (tx.type === 'income' ? tx.amount : tx.type === 'expense' ? -tx.amount : 0);
 
@@ -12,7 +13,7 @@ export function monthSummary(txs, month, { currency = 'KZT', accountId = null, e
   let income = 0;
   let expense = 0;
   for (const tx of txs) {
-    if (tx.deleted || tx.currency !== currency || outside(tx, range)) continue;
+    if (tx.deleted || tx.currency !== currency || outside(tx, range) || isAdjustment(tx)) continue;
     if (accountId && tx.account_id !== accountId) continue;
     if (!accountId && excludeAccounts?.has(tx.account_id)) continue; // счёт скрыт из общего баланса
     if (tx.type === 'income') income += tx.amount;
@@ -42,7 +43,7 @@ export function groupByDay(txs, month, opts = {}) {
     if (!byDay.has(day)) byDay.set(day, { day, total: 0, items: [] });
     const group = byDay.get(day);
     group.items.push(tx);
-    if (tx.currency === currency) group.total += signed(tx);
+    if (tx.currency === currency && !isAdjustment(tx)) group.total += signed(tx);
   }
   const days = [...byDay.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
   for (const group of days) group.items.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
