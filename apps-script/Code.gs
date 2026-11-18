@@ -8,6 +8,10 @@
  * Токен хранится только в свойствах скрипта (Script Properties, ключ TOKEN).
  * В этом файле токена нет и быть не должно.
  *
+ * Виджет (Scriptable) пользуется отдельным токеном WIDGET_TOKEN: с ним доступно только
+ * действие summary — итоги дохода и расхода за день и месяц. Записывать и читать операции
+ * по нему нельзя. Создаётся функцией setupWidget().
+ *
  * Имена листов и колонок менять нельзя: на них опираются формулы сводки и приложение.
  * Если схему нужно изменить, увеличьте SCHEMA_VERSION и добавьте миграцию.
  */
@@ -19,6 +23,9 @@ var MAX_TEXT = 4000;
 var LOCK_WAIT_MS = 20000;
 var SUMMARY_SHEET = 'Сводка по месяцам';
 var SUMMARY_CURRENCY = 'KZT';
+// Служебные категории корректировки остатка: в доходы и расходы не входят (как в приложении).
+var ADJUST_CATEGORY_IDS = ['adjust-income', 'adjust-expense'];
+var MAX_EXCLUDED_ACCOUNTS = 20;
 
 var TYPE_LABELS = { expense: 'Расход', income: 'Доход', transfer: 'Перевод' };
 var SOURCE_LABELS = {
@@ -199,9 +206,14 @@ function handle(e) {
 
     var body = parseBody(e);
     if (!body) return failure('bad_request', 'Тело запроса должно быть JSON-объектом.');
-    if (!safeEqual(body.token, expected)) return failure('unauthorized', 'Неверный токен.');
+    var widgetToken = PropertiesService.getScriptProperties().getProperty('WIDGET_TOKEN');
+    var full = safeEqual(body.token, expected);
+    var widget = !full && Boolean(widgetToken) && safeEqual(body.token, widgetToken);
+    if (!full && !widget) return failure('unauthorized', 'Неверный токен.');
 
     var now = Date.now();
+    if (body.action === 'summary') return actionSummary(body, now);
+    if (widget) return failure('forbidden', 'Токен виджета позволяет только получать итоги.');
     switch (body.action) {
       case 'ping': return { ok: true, server_time: now, schema: SCHEMA_VERSION };
       case 'add': return withLock(function () { return actionAdd(body, now); });
@@ -421,6 +433,49 @@ function actionPull(body, now) {
   return out;
 }
 
+/**
+ * summary: итоги дохода и расхода за день и месяц для виджета. Только чтение, листы не создаёт.
+ * Считается как в приложении: тенге, без удалённых операций, переводов и корректировок остатка.
+ * exclude_accounts — названия счетов, которые не входят в итоги (например, «вне общего баланса»).
+ */
+function actionSummary(body, now) {
+  var today = body.today;
+  if (typeof today !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(today)) {
+    throw new ApiError('bad_request', 'Нужна дата today в виде ГГГГ-ММ-ДД.');
+  }
+  var exclude = body.exclude_accounts === undefined ? [] : body.exclude_accounts;
+  if (!Array.isArray(exclude) || exclude.length > MAX_EXCLUDED_ACCOUNTS
+    || !exclude.every(function (name) { return typeof name === 'string' && name.length <= 200; })) {
+    throw new ApiError('bad_request', 'exclude_accounts должен быть списком названий счетов.');
+  }
+  var month = today.slice(0, 7);
+  var out = {
+    ok: true, server_time: now, today: today, month: month, updated_at: null,
+    day: { income: 0, expense: 0, count: 0 },
+    period: { income: 0, expense: 0, count: 0 },
+  };
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('transactions');
+  if (!sheet || sheet.getLastRow() < 2) return out;
+  var lastSync = 0;
+  readTable(sheet, DEFS.transactions).objects.forEach(function (row) {
+    lastSync = Math.max(lastSync, Number(row.synced_at) || 0);
+    if (row['Удалена'] === YES || text(row['Валюта']) !== SUMMARY_CURRENCY) return;
+    if (ADJUST_CATEGORY_IDS.indexOf(text(row.category_id)) !== -1) return;
+    if (exclude.indexOf(text(row['Счёт'])) !== -1) return;
+    var type = reverse(TYPE_LABELS, row['Тип']);
+    if (type !== 'income' && type !== 'expense') return;
+    var day = text(row['Дата']);
+    if (day.slice(0, 7) !== month) return;
+    var amount = Math.round(Number(row['Сумма']) * 100);
+    if (!isFinite(amount)) return;
+    out.period[type] += amount;
+    out.period.count++;
+    if (day === today) { out.day[type] += amount; out.day.count++; }
+  });
+  out.updated_at = lastSync || null;
+  return out;
+}
+
 /** delete: мягкое удаление по id. Строки остаются в таблице с пометкой. */
 function actionDelete(body, now) {
   var def = DEFS[body.store];
@@ -613,6 +668,28 @@ function resetToken() {
   PropertiesService.getScriptProperties().setProperty('TOKEN', newToken());
   Logger.log('Новый токен:');
   Logger.log(PropertiesService.getScriptProperties().getProperty('TOKEN'));
+}
+
+/**
+ * Токен для виджета Scriptable: позволяет только получать итоги (summary).
+ * Печатается в журнале. Повторный запуск существующий токен не меняет.
+ */
+function setupWidget() {
+  var props = PropertiesService.getScriptProperties();
+  if (!props.getProperty('WIDGET_TOKEN')) {
+    props.setProperty('WIDGET_TOKEN', newToken());
+    Logger.log('Создан токен виджета. Он даёт только чтение итогов:');
+  } else {
+    Logger.log('Токен виджета уже задан:');
+  }
+  Logger.log(props.getProperty('WIDGET_TOKEN'));
+}
+
+/** Заменяет токен виджета. Старый перестаёт работать сразу: введите новый в Scriptable. */
+function resetWidgetToken() {
+  PropertiesService.getScriptProperties().setProperty('WIDGET_TOKEN', newToken());
+  Logger.log('Новый токен виджета:');
+  Logger.log(PropertiesService.getScriptProperties().getProperty('WIDGET_TOKEN'));
 }
 
 function newToken() {

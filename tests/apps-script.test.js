@@ -424,3 +424,85 @@ test('doGet: подсказка вместо данных', () => {
   const out = JSON.parse(gas.context.doGet({ parameter: { token: 'test-token' } }).content);
   assert.equal(out.ok, false);
 });
+
+// ---------- итоги для виджета ----------
+
+test('summary: доход и расход за день и месяц, как в приложении', () => {
+  const gas = createGas();
+  gas.call({ action: 'upsert', transactions: [
+    tx({ id: 'a', date: '2026-11-18T09:00:00', amount: 125000 }),
+    tx({ id: 'b', date: '2026-11-18T12:30:00', amount: 50050 }),
+    tx({ id: 'c', date: '2026-11-03T10:00:00', amount: 700000 }),
+    tx({ id: 'd', date: '2026-11-05T10:00:00', amount: 62000000, type: 'income', category_id: 'cat-salary' }),
+    tx({ id: 'e', date: '2026-10-31T23:59:00', amount: 999900 }),
+    tx({ id: 'f', date: '2026-11-18T13:00:00', amount: 10000, deleted: true, deleted_at: 5 }),
+    tx({ id: 'g', date: '2026-11-18T13:00:00', amount: 20000, type: 'transfer', category_id: null, to_account_id: 'acc-2' }),
+    tx({ id: 'h', date: '2026-11-18T13:00:00', amount: 3000, currency: 'USD' }),
+    tx({ id: 'i', date: '2026-11-18T13:00:00', amount: 30000, category_id: 'adjust-expense' }),
+    tx({ id: 'j', date: '2026-11-10T13:00:00', amount: 40000, type: 'income', category_id: 'adjust-income' }),
+  ] });
+  const res = gas.call({ action: 'summary', today: '2026-11-18' });
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.day, { income: 0, expense: 175050, count: 2 });
+  assert.deepEqual(res.period, { income: 62000000, expense: 875050, count: 4 });
+  assert.equal(res.month, '2026-11');
+  assert.equal(res.updated_at, gas.now(), 'время последней записи в таблицу');
+});
+
+test('summary: счета вне общего баланса исключаются по названию', () => {
+  const gas = createGas();
+  gas.call({ action: 'upsert', transactions: [
+    tx({ id: 'a', date: '2026-11-18T09:00:00', amount: 1000 }),
+    tx({ id: 'b', date: '2026-11-18T09:00:00', amount: 500000, type: 'income', account_id: 'acc-dep', account: 'Депозит' }),
+  ] });
+  const all = gas.call({ action: 'summary', today: '2026-11-18' });
+  assert.equal(all.day.income, 500000);
+  const res = gas.call({ action: 'summary', today: '2026-11-18', exclude_accounts: ['Депозит'] });
+  assert.deepEqual(res.day, { income: 0, expense: 1000, count: 1 });
+  assert.equal(gas.call({ action: 'summary', today: '2026-11-18', exclude_accounts: 'Депозит' }).error, 'bad_request');
+});
+
+test('summary: без даты — ошибка; пустая таблица — нули, листы не создаются', () => {
+  const gas = createGas();
+  for (const today of [undefined, '', '18.11.2026', '2026-11']) {
+    assert.equal(gas.call({ action: 'summary', today }).error, 'bad_request', String(today));
+  }
+  const res = gas.call({ action: 'summary', today: '2026-11-18' });
+  assert.deepEqual([res.ok, res.day, res.period, res.updated_at], [true, { income: 0, expense: 0, count: 0 }, { income: 0, expense: 0, count: 0 }, null]);
+  assert.equal(gas.sheets.size, 0, 'чтение итогов ничего не создаёт');
+});
+
+test('токен виджета: только summary, остальное запрещено; основной токен тоже может summary', () => {
+  const gas = createGas();
+  gas.props.set('WIDGET_TOKEN', 'widget-token');
+  gas.call({ action: 'upsert', transactions: [tx({ date: '2026-11-18T09:00:00' })] });
+  assert.equal(gas.call({ action: 'summary', today: '2026-11-18' }, 'widget-token').day.expense, 845050);
+  for (const action of ['ping', 'add', 'upsert', 'pull', 'delete']) {
+    const res = gas.call({ action, text: 'x', source: 'sms', transactions: [tx({ id: 'new' })], store: 'transactions', ids: ['tx-1'] }, 'widget-token');
+    assert.deepEqual([res.ok, res.error], [false, 'forbidden'], action);
+  }
+  assert.equal(gas.sheet('transactions').objects().length, 1, 'по токену виджета ничего не записано');
+  assert.equal(gas.sheet('inbox').objects().length, 0);
+  assert.equal(gas.call({ action: 'summary', today: '2026-11-18' }, 'widget-toke').error, 'unauthorized');
+  assert.equal(gas.call({ action: 'summary', today: '2026-11-18' }).ok, true);
+});
+
+test('без WIDGET_TOKEN пустой или любой токен виджета не подходит', () => {
+  const gas = createGas();
+  for (const token of ['', 'null', undefined]) {
+    assert.equal(gas.call({ action: 'summary', today: '2026-11-18' }, token).error, 'unauthorized');
+  }
+});
+
+test('setupWidget(): создаёт отдельный токен, повторный запуск его не меняет', () => {
+  const gas = createGas();
+  gas.context.setupWidget();
+  const token = gas.props.get('WIDGET_TOKEN');
+  assert.match(token, /^[0-9a-f]{64}$/);
+  assert.notEqual(token, gas.props.get('TOKEN'));
+  gas.context.setupWidget();
+  assert.equal(gas.props.get('WIDGET_TOKEN'), token);
+  gas.context.resetWidgetToken();
+  assert.notEqual(gas.props.get('WIDGET_TOKEN'), token);
+  assert.equal(gas.call({ action: 'summary', today: '2026-11-18' }, token).error, 'unauthorized');
+});
