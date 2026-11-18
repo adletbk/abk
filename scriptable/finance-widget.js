@@ -189,17 +189,31 @@ function message(widget, title, body) {
   widget.addSpacer();
 }
 
-function small(widget, result, now) {
-  const day = result.data.day;
-  header(widget, 'Сегодня');
+/** Маленький: сегодня или, с параметром «месяц», текущий месяц. */
+function small(widget, result, now, mode) {
+  const monthly = mode === 'month';
+  const totals = monthly ? result.data.period : result.data.day;
+  const monthIndex = Number(String(result.data.month || '').slice(5, 7)) - 1;
+  header(widget, monthly ? (MONTHS[monthIndex] || 'Месяц') : 'Сегодня');
   widget.addSpacer();
   text(widget, 'Расход', { size: 12, color: C.text2 });
-  text(widget, day ? expenseText(day.expense) : '—', { size: 26, weight: 'bold', color: C.expense, scale: 0.5 });
+  text(widget, totals ? expenseText(totals.expense) : '—', { size: 26, weight: 'bold', color: C.expense, scale: 0.5 });
   const row = widget.addStack();
   text(row, 'Доход ', { size: 12, color: C.text2 });
-  text(row, day ? incomeText(day.income) : '—', { size: 12, weight: 'medium', color: C.income });
+  text(row, totals ? incomeText(totals.income) : '—', { size: 12, weight: 'medium', color: C.income, scale: 0.7 });
+  if (monthly && totals) {
+    const rest = totals.income - totals.expense;
+    const restRow = widget.addStack();
+    text(restRow, 'Остаток ', { size: 12, color: C.text2 });
+    text(restRow, signedText(rest), { size: 12, weight: 'medium', color: rest < 0 ? C.red : C.income, scale: 0.7 });
+  }
   widget.addSpacer();
   footer(widget, result, now);
+}
+
+/** Параметр виджета (поле Parameter в настройках виджета): «месяц» — итоги месяца вместо дня. */
+function modeOf(parameter) {
+  return /месяц|month/i.test(String(parameter || '')) ? 'month' : 'day';
 }
 
 function medium(widget, result, now) {
@@ -268,7 +282,7 @@ function plural(n, [one, few, many]) {
   return many;
 }
 
-function build(result, family, now) {
+function build(result, family, now, mode = 'day') {
   const widget = new ListWidget();
   const accessory = String(family).startsWith('accessory');
   if (!accessory) {
@@ -293,7 +307,7 @@ function build(result, family, now) {
   } else if (family === 'accessoryRectangular') {
     rectangular(widget, result);
   } else if (family === 'small') {
-    small(widget, result, now);
+    small(widget, result, now, mode);
   } else {
     medium(widget, result, now);
   }
@@ -353,7 +367,8 @@ async function main() {
   const now = new Date();
   if (config.runsInWidget) {
     const result = await load(dayKey(now));
-    Script.setWidget(build(result, config.widgetFamily || 'small', now));
+    const parameter = typeof args !== 'undefined' && args ? args.widgetParameter : null;
+    Script.setWidget(build(result, config.widgetFamily || 'small', now, modeOf(parameter)));
     return;
   }
   if (!settings()) {
@@ -362,17 +377,18 @@ async function main() {
   const menu = new Alert();
   menu.title = 'Виджет «Финансы»';
   menu.addAction('Показать маленький');
+  menu.addAction('Показать маленький за месяц');
   menu.addAction('Показать средний');
   menu.addAction('Изменить адрес и токен');
   menu.addDestructiveAction('Удалить настройки');
   menu.addCancelAction('Закрыть');
   const choice = await menu.presentAlert();
-  if (choice === 0 || choice === 1) {
-    const widget = build(await load(dayKey(now)), choice === 0 ? 'small' : 'medium', now);
-    if (choice === 0) await widget.presentSmall(); else await widget.presentMedium();
-  } else if (choice === 2) {
-    await setup();
+  if (choice >= 0 && choice <= 2) {
+    const widget = build(await load(dayKey(now)), choice === 2 ? 'medium' : 'small', now, choice === 1 ? 'month' : 'day');
+    if (choice === 2) await widget.presentMedium(); else await widget.presentSmall();
   } else if (choice === 3) {
+    await setup();
+  } else if (choice === 4) {
     await forget();
   }
 }

@@ -23,7 +23,7 @@ class Node {
 }
 
 /** Запускает скрипт. answers — ответы на окна Alert по порядку: { action, fields }. */
-async function run({ family = 'small', inWidget = true, keychain = {}, files = {}, respond, answers = [], date = '2026-11-18T15:00:00' } = {}) {
+async function run({ family = 'small', parameter = null, inWidget = true, keychain = {}, files = {}, respond, answers = [], date = '2026-11-18T15:00:00' } = {}) {
   const requests = [];
   const shown = { widget: null, presented: null, alerts: [] };
   const store = new Map(Object.entries(keychain));
@@ -48,6 +48,7 @@ async function run({ family = 'small', inWidget = true, keychain = {}, files = {
     Date: FakeDate, JSON, Math, Number, String, Object, Array, Promise, Error, RegExp,
     console,
     config: { runsInWidget: inWidget, widgetFamily: family },
+    args: { widgetParameter: parameter },
     Script: { setWidget: (w) => { shown.widget = w; }, complete: () => {} },
     ListWidget: class extends Node { constructor() { super('widget'); } async presentSmall() { shown.presented = ['small', this]; } async presentMedium() { shown.presented = ['medium', this]; } },
     Color: class { constructor(hex) { this.hex = hex; } },
@@ -179,10 +180,28 @@ test('настройка: неверный адрес или токен не с�
   const rejected = await run({ inWidget: false, respond: () => ({ ok: false, message: 'Неверный токен.' }), answers: [{ action: 0, fields: [URL_OK, TOKEN] }, { action: 0 }] });
   assert.equal(rejected.store.size, 0, 'токен, который таблица не приняла, не сохраняется');
 
-  const good = await run({ inWidget: false, respond: () => SUMMARY, answers: [{ action: 0, fields: [URL_OK, TOKEN] }, { action: 0 }, { action: 1 }] });
+  const good = await run({ inWidget: false, respond: () => SUMMARY, answers: [{ action: 0, fields: [URL_OK, TOKEN] }, { action: 0 }, { action: 2 }] });
   assert.equal(good.store.get('finance.widget.token'), TOKEN);
   assert.equal(good.presented[0], 'medium', 'после настройки можно посмотреть виджет');
 
-  const forgotten = await run({ inWidget: false, keychain: configured, files: { '/docs/finance-widget-cache.json': '{}' }, respond: () => SUMMARY, answers: [{ action: 3 }, { action: 0 }] });
+  const forgotten = await run({ inWidget: false, keychain: configured, files: { '/docs/finance-widget-cache.json': '{}' }, respond: () => SUMMARY, answers: [{ action: 4 }, { action: 0 }] });
   assert.deepEqual([forgotten.store.size, forgotten.disk.size], [0, 0]);
+});
+
+test('виджет: маленький с параметром «месяц» — итоги месяца и остаток', async () => {
+  for (const parameter of ['месяц', 'Месяц', 'month']) {
+    const texts = (await run({ parameter, keychain: configured, respond: () => SUMMARY })).widget.texts();
+    for (const expected of ['НОЯБРЬ', '−384 200 ₸', '+620 000 ₸', '+235 800 ₸']) {
+      assert.ok(texts.includes(expected), `${parameter} / ${expected}: ${texts.join(' | ')}`);
+    }
+    assert.ok(!texts.includes('СЕГОДНЯ'));
+  }
+  const day = (await run({ parameter: '', keychain: configured, respond: () => SUMMARY })).widget.texts();
+  assert.ok(day.includes('СЕГОДНЯ') && day.includes('−12 450 ₸'), 'без параметра — как раньше, за сегодня');
+});
+
+test('меню: маленький за месяц можно посмотреть из Scriptable', async () => {
+  const { presented } = await run({ inWidget: false, keychain: configured, respond: () => SUMMARY, answers: [{ action: 1 }] });
+  assert.equal(presented[0], 'small');
+  assert.ok(presented[1].texts().includes('НОЯБРЬ'));
 });
