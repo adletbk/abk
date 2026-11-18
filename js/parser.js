@@ -218,15 +218,19 @@ export const firstLine = (text) => String(text ?? '').trim().split(/\r?\n/, 1)[0
 
 /**
  * Freedom Bank (приложение Freedom SuperApp). Составлено по уведомлениям пользователя.
- * Команда iOS должна присылать заголовок и текст уведомления вместе, через перенос строки:
+ * Команда iOS присылает заголовок и текст уведомления вместе. Сумма бывает и на отдельной
+ * строке, и в одной строке с получателем:
  *
- *   Покупка <получатель>            Кешбэк за покупку
- *   -18 282 ₸                       +159 ₸
- *   Доступно 1 000 850,27 ₸         <ПОЛУЧАТЕЛЬ>
+ *   Покупка <получатель>            Покупка <получатель> -1 123 ₸     Кешбэк за покупку
+ *   -18 282 ₸                       Доступно 1 123 123,12 ₸           +159 ₸
+ *   Доступно 1 000 850,27 ₸         Списано с Deposit Card **0000     <ПОЛУЧАТЕЛЬ>
  *   Списано с Deposit Card **0000
  *
+ * Сумма покупки — первое число со знаком минус перед ₸: остаток «Доступно» минуса не имеет.
  * Третье правило — запасное, для записей без заголовка (только текст уведомления).
  */
+const AMOUNT_WITH_MINUS = '[-\u2212]\\s*(\\d[\\d\\s.,]*?)\\s*₸';
+
 export const FREEDOM_PRESET = [
   {
     id: 'preset-freedom-cashback', name: 'Freedom: кешбэк (не операция)', type: 'ignore',
@@ -235,17 +239,48 @@ export const FREEDOM_PRESET = [
   {
     id: 'preset-freedom-purchase', name: 'Freedom: покупка', type: 'expense', sources: ['notification'],
     match: '^\\s*Покупка\\s',
-    amount: '^[^\\n]*\\n\\s*[-\u2212]?\\s*([\\d\\s.,]+?)\\s*₸',
-    merchant: '^\\s*Покупка\\s+([^\\n]+)',
+    amount: AMOUNT_WITH_MINUS,
+    merchant: '^\\s*Покупка\\s+(.+?)(?=\\s+[-\u2212]\\s*\\d|\\s*\\n|\\s*$)',
     account: '\\*\\*(\\d{4})',
   },
   {
     id: 'preset-freedom-debit', name: 'Freedom: списание без заголовка', type: 'expense', sources: ['notification'],
     match: 'Списано с',
-    amount: '^\\s*[-\u2212]\\s*([\\d\\s.,]+?)\\s*₸',
+    amount: AMOUNT_WITH_MINUS,
     account: '\\*\\*(\\d{4})',
   },
 ];
+
+/**
+ * Прежние версии готовых правил. Если правило у пользователя совпадает с одной из них
+ * (то есть его не меняли вручную), upgradePreset заменяет его новой версией.
+ */
+export const FREEDOM_HISTORY = {
+  'preset-freedom-purchase': [{
+    type: 'expense', sources: ['notification'], match: '^\\s*Покупка\\s',
+    amount: '^[^\\n]*\\n\\s*[-\u2212]?\\s*([\\d\\s.,]+?)\\s*₸',
+    merchant: '^\\s*Покупка\\s+([^\\n]+)', account: '\\*\\*(\\d{4})',
+  }],
+  'preset-freedom-debit': [{
+    type: 'expense', sources: ['notification'], match: 'Списано с',
+    amount: '^\\s*[-\u2212]\\s*([\\d\\s.,]+?)\\s*₸', merchant: '', account: '\\*\\*(\\d{4})',
+  }],
+};
+
+const ruleKey = (r) => JSON.stringify([r.type, [...(r.sources ?? [])].sort(), r.match ?? '', r.amount ?? '', r.merchant ?? '', r.account ?? '']);
+
+/** Обновляет готовые правила, которые пользователь не менял. Возвращает число обновлённых. */
+export async function upgradePreset(db, preset, history, now = Date.now()) {
+  let upgraded = 0;
+  for (const fields of preset) {
+    const existing = await db.get('rules', fields.id);
+    if (!existing || existing.deleted || ruleKey(existing) === ruleKey({ merchant: '', account: '', ...fields })) continue;
+    if (!(history[fields.id] ?? []).some((old) => ruleKey(old) === ruleKey(existing))) continue;
+    await db.put('rules', { ...existing, ...fields, merchant: fields.merchant ?? '', account: fields.account ?? '', updated_at: now });
+    upgraded++;
+  }
+  return upgraded;
+}
 
 /** Добавляет готовые правила, которых ещё нет. Правки и удаления пользователя не трогает. Возвращает число добавленных. */
 export async function addPreset(db, preset, now = Date.now()) {

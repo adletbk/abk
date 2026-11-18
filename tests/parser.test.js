@@ -188,6 +188,29 @@ test('Freedom: только тело уведомления (старая Ком
   const parsed = parseInboxItem(item({ text: '-18 282 ₸\nДоступно 1 000 850,27 ₸\nСписано с Deposit Card **0000' }), ctx);
   assert.deepEqual([parsed.ok, parsed.fields.amount, parsed.fields.merchant, parsed.fields.account_id], [true, 1828200, '', 'dep']);
 });
+test('Freedom: сумма в одной строке с получателем (заголовок и текст через пробел)', () => {
+  const text = 'Покупка Jetpay.kz*dodo.kz -1 123 ₸\nДоступно 1 123 123,12 ₸\nСписано с Deposit Card **0000';
+  const parsed = parseInboxItem(item({ text }), ctx);
+  assert.deepEqual([parsed.ok, parsed.fields.amount, parsed.fields.merchant, parsed.fields.account_id], [true, 112300, 'Jetpay.kz*dodo.kz', 'dep']);
+  const flat = parseInboxItem(item({ text: text.replaceAll('\n', ' ') }), ctx);
+  assert.deepEqual([flat.fields.amount, flat.fields.merchant, flat.fields.account_id], [112300, 'Jetpay.kz*dodo.kz', 'dep']);
+  const dashed = parseInboxItem(item({ text: 'Покупка Store-24 -500,50 ₸\nДоступно 10 ₸\nСписано с Deposit Card **0000' }), ctx);
+  assert.deepEqual([dashed.fields.amount, dashed.fields.merchant], [50050, 'Store-24'], 'дефис в названии не путается с минусом');
+});
+test('готовые правила: неизменённая старая версия обновляется, изменённая вручную — нет', async () => {
+  const { FREEDOM_HISTORY, upgradePreset } = await import('../js/parser.js');
+  const store = new Map();
+  const db = { get: async (_, id) => store.get(id), put: async (_, row) => { store.set(row.id, row); } };
+  const old = FREEDOM_HISTORY['preset-freedom-purchase'][0];
+  store.set('preset-freedom-purchase', newParseRule({ id: 'preset-freedom-purchase', name: 'Freedom: покупка', ...old, account_id: 'dep', enabled: false }, 1));
+  store.set('preset-freedom-debit', newParseRule({ id: 'preset-freedom-debit', name: 'Своё', ...FREEDOM_HISTORY['preset-freedom-debit'][0], match: 'Моё условие' }, 1));
+  assert.equal(await upgradePreset(db, FREEDOM_PRESET, FREEDOM_HISTORY, 5), 1);
+  const purchase = store.get('preset-freedom-purchase');
+  assert.equal(purchase.amount, FREEDOM_PRESET.find((r) => r.id === purchase.id).amount);
+  assert.deepEqual([purchase.account_id, purchase.enabled, purchase.updated_at], ['dep', false, 5], 'настройки пользователя сохраняются');
+  assert.equal(store.get('preset-freedom-debit').match, 'Моё условие');
+  assert.equal(await upgradePreset(db, FREEDOM_PRESET, FREEDOM_HISTORY, 6), 0, 'повторно не обновляется');
+});
 test('Freedom: кешбэк помечается как не операция', () => {
   assert.deepEqual(parseInboxItem(item({ text: 'Кешбэк за покупку\n+159 ₸\nTEST SHOP' }), ctx).ignore, true);
   assert.deepEqual(parseInboxItem(item({ text: 'Кешбек за покупку\n+556,2 ₸\nTEST SHOP' }), ctx).ignore, true, 'оба написания: кешбэк и кешбек');

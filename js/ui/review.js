@@ -6,7 +6,7 @@ import { openSheet, pickSheet, confirmSheet } from './sheet.js';
 import { formatMoney } from '../money.js';
 import { TYPE_LABELS, plural } from '../model.js';
 import {
-  FREEDOM_PRESET, RULE_SOURCES, RULE_TYPES, addPreset, applyRule, escapeRegex, firstLine, matchAccount,
+  FREEDOM_PRESET, FREEDOM_HISTORY, upgradePreset, RULE_SOURCES, RULE_TYPES, addPreset, applyRule, escapeRegex, firstLine, matchAccount,
   newParseRule, normalizeMerchant, validateRule,
 } from '../parser.js';
 import { learnMerchant, processInbox } from '../inbox.js';
@@ -157,9 +157,10 @@ export async function renderRules(root, ctx) {
     h('button', {
       type: 'button', class: 'btn-secondary', text: 'Добавить готовые правила Freedom Bank',
       onClick: async () => {
+        const upgraded = await upgradePreset(db, FREEDOM_PRESET, FREEDOM_HISTORY);
         const added = await addPreset(db, FREEDOM_PRESET);
         const result = await processInbox(db, { retry: true });
-        toast(added ? `Добавлено правил: ${added}. ${describeProcessing(result)}` : 'Эти правила уже есть');
+        toast(added || upgraded ? `Добавлено правил: ${added}, обновлено: ${upgraded}. ${describeProcessing(result)}` : 'Эти правила уже есть');
         ctx.render();
       },
     }),

@@ -33,6 +33,7 @@ export function newPlanned(fields = {}, now = Date.now()) {
     account_id: null,
     start: null,           // первая дата платежа, «ГГГГ-ММ-ДД»
     repeat: 'month',
+    until: null,           // месяц последнего платежа «ГГГГ-ММ»; null — без конца
     icon: null,            // null — как у категории
     color: null,
     note: '',
@@ -52,12 +53,18 @@ export function validatePlanned(p) {
   if (!p.category_id) errors.push('Выберите категорию');
   if (!DAY_RE.test(p.start ?? '')) errors.push('Выберите дату платежа');
   if (!REPEAT_VALUES.has(p.repeat)) errors.push('Выберите повтор');
+  if (p.until != null && p.repeat !== 'once') {
+    if (!/^\d{4}-\d{2}$/.test(p.until)) errors.push('Последний платёж: выберите месяц');
+    else if (DAY_RE.test(p.start ?? '') && p.until < p.start.slice(0, 7)) errors.push('Последний платёж раньше первого');
+  }
   return errors;
 }
 
 /** Даты платежа в диапазоне [from, to] включительно, по возрастанию. */
-export function occurrences(p, from, to) {
-  if (!DAY_RE.test(p.start ?? '') || to < p.start) return [];
+export function occurrences(p, from, rangeTo) {
+  const end = p.repeat !== 'once' && /^\d{4}-\d{2}$/.test(p.until ?? '') ? monthRange(p.until).to : null;
+  const to = end && end < rangeTo ? end : rangeTo;
+  if (!DAY_RE.test(p.start ?? '') || to < p.start || to < from) return [];
   const lo = from < p.start ? p.start : from;
   const out = [];
   if (p.repeat === 'once') {
@@ -82,6 +89,12 @@ export function occurrences(p, from, to) {
     }
   }
   return out;
+}
+
+/** Это последняя дата платежа: дальше по месяцу «until» платежей нет. */
+export function isLastOccurrence(p, day) {
+  if (p.repeat === 'once' || !/^\d{4}-\d{2}$/.test(p.until ?? '')) return false;
+  return occurrences(p, addDays(day, 1), monthRange(p.until).to).length === 0;
 }
 
 /**

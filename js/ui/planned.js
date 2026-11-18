@@ -10,7 +10,14 @@ import { diffDays } from '../period.js';
 import { CATEGORY_ICONS, PALETTE, orderedCategories } from '../catalog.js';
 import {
   REPEATS, newPlanned, validatePlanned, schedule, overdue, scheduleSummary, markPlanned, monthGrid, monthRange,
+  isLastOccurrence,
 } from '../planned.js';
+
+/** «Март 2027» из «2027-03». */
+const untilText = (until) => {
+  const [year] = until.split('-');
+  return `${capitalize(monthTitle(until, `${year}-01-01`))} ${year}`;
+};
 
 const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const FALLBACK = { icon: 'lu-calendar', color: '#737373' };
@@ -50,13 +57,14 @@ export async function renderPlanned(root, ctx) {
   };
   const whereText = (p) => [categoriesById.get(p.category_id)?.name, accountsById.get(p.account_id)?.name].filter(Boolean).join(' · ');
   function whenText(item) {
+    const last = isLastOccurrence(item.payment, item.day) ? ' · последний' : '';
     const date = dayShort(item.day, today);
-    if (item.status === 'paid') return `Оплачено · ${date}`;
-    if (item.status === 'skipped') return `Пропущен · ${date}`;
+    if (item.status === 'paid') return `Оплачено · ${date}${last}`;
+    if (item.status === 'skipped') return `Пропущен · ${date}${last}`;
     const days = diffDays(today, item.day);
-    if (days < 0) return `Просрочен на ${-days} ${plural(-days, DAYS)} · до ${date}`;
-    if (days === 0) return 'Оплатить сегодня';
-    return `до ${date} · через ${days} ${plural(days, DAYS)}`;
+    if (days < 0) return `Просрочен на ${-days} ${plural(-days, DAYS)} · до ${date}${last}`;
+    if (days === 0) return `Оплатить сегодня${last}`;
+    return `до ${date} · через ${days} ${plural(days, DAYS)}${last}`;
   }
 
   const rerender = () => ctx.render();
@@ -155,7 +163,7 @@ export async function renderPlanned(root, ctx) {
       title: 'Все платежи',
       items: [...active].sort((a, b) => a.name.localeCompare(b.name, 'ru')).map((p) => ({
         value: p.id, label: p.name, icon: look(p).icon, color: look(p).color,
-        right: `${REPEATS.find((r) => r.value === p.repeat)?.label ?? ''}${p.amount == null ? '' : ` · ${formatMoney(p.amount, p.currency)}`}`,
+        right: `${REPEATS.find((r) => r.value === p.repeat)?.label ?? ''}${p.until && p.repeat !== 'once' ? ` до ${untilText(p.until).toLowerCase()}` : ''}${p.amount == null ? '' : ` · ${formatMoney(p.amount, p.currency)}`}`,
       })),
     });
     if (picked) await edit(active.find((p) => p.id === picked.value));
@@ -214,6 +222,23 @@ export function editPlanned(ctx, { payment = null, day = null, categories, accou
       value: draft.amount ? amountToText(draft.amount) : '', autocomplete: 'off', enterkeyhint: 'done', 'aria-label': 'Сумма',
     });
     const start = h('input', { class: 'line-input plan-date', type: 'date', value: draft.start ?? '', 'aria-label': 'Оплатить до' });
+    // Месяц последнего платежа: пусто — платёж без конца.
+    const until = h('input', {
+      class: 'line-input plan-date', type: 'month', value: draft.until ?? '', 'aria-label': 'Месяц последнего платежа',
+      onChange: () => paintUntil(),
+    });
+    const untilClear = h('button', {
+      type: 'button', class: 'plan-clear', 'aria-label': 'Без конца',
+      onClick: () => { until.value = ''; paintUntil(); },
+    }, icon('close', 16));
+    const untilSub = h('span', { class: 'form-line-sub' });
+    const untilLine = h('div', { class: 'form-line' },
+      h('span', { class: 'form-line-main' }, h('span', { text: 'Последний платёж' }), untilSub), until, untilClear);
+    function paintUntil() {
+      untilLine.hidden = draft.repeat === 'once';
+      untilClear.hidden = !until.value;
+      untilSub.textContent = until.value ? 'включительно' : 'без конца';
+    }
     const note = h('input', {
       class: 'line-input', type: 'text', value: draft.note ?? '', placeholder: 'необязательно', maxlength: '200',
       autocomplete: 'off', 'aria-label': 'Заметка',
@@ -266,7 +291,7 @@ export function editPlanned(ctx, { payment = null, day = null, categories, accou
     const seg = h('div', { class: 'plan-seg', role: 'group', 'aria-label': 'Повтор' });
     const paintSeg = () => clear(seg).append(...REPEATS.map((r) => h('button', {
       type: 'button', text: r.label, 'aria-pressed': String(draft.repeat === r.value),
-      onClick: () => { draft.repeat = r.value; paintSeg(); },
+      onClick: () => { draft.repeat = r.value; paintSeg(); paintUntil(); },
     })));
 
     async function save() {
@@ -274,7 +299,7 @@ export function editPlanned(ctx, { payment = null, day = null, categories, accou
       if (value === null || value < 0) { toast('Сумма: введите число'); return; }
       Object.assign(draft, {
         name: name.value.trim() || categoryOf()?.name || '', amount: value === 0 ? null : value,
-        start: start.value, note: note.value.trim(), updated_at: Date.now(),
+        start: start.value, until: draft.repeat === 'once' ? null : until.value || null, note: note.value.trim(), updated_at: Date.now(),
       });
       const errors = validatePlanned(draft);
       if (errors.length) { toast(errors[0]); return; }
@@ -293,7 +318,7 @@ export function editPlanned(ctx, { payment = null, day = null, categories, accou
       close();
     }
 
-    paintLines(); paintSeg();
+    paintLines(); paintSeg(); paintUntil();
     const line = (label, control, sub = null) => h('div', { class: 'form-line' },
       h('span', { class: 'form-line-main' }, h('span', { text: label }), sub && h('span', { class: 'form-line-sub', text: sub })), control);
     const content = h('div', { class: 'form' },
@@ -304,10 +329,11 @@ export function editPlanned(ctx, { payment = null, day = null, categories, accou
         line('Счёт', accountButton),
         line(payment ? 'Первая дата' : 'Оплатить до', start)),
       seg,
+      h('div', { class: 'form-card' }, untilLine),
       h('div', { class: 'form-card' },
         line('Иконка и цвет', lookButton),
         line('Заметка', note)),
-      h('p', { class: 'field-hint', text: 'Повтор считается от выбранной даты: каждый месяц в то же число, каждую неделю в тот же день. Плановые платежи хранятся только на устройстве и в JSON-бэкапе.' }),
+      h('p', { class: 'field-hint', text: 'Повтор считается от выбранной даты: каждый месяц в то же число, каждую неделю в тот же день. Последний платёж — месяц, после которого платёж исчезнет из календаря. Плановые платежи хранятся только на устройстве и в JSON-бэкапе.' }),
       h('button', { type: 'button', class: 'btn-primary', text: 'Сохранить', onClick: save }),
       payment && h('button', { type: 'button', class: 'btn-secondary btn-danger', text: 'Удалить', onClick: remove }));
     const close = openSheet({ title: payment ? 'Платёж' : 'Новый платёж', content, tall: true, onClose: () => resolve(result) });

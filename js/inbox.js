@@ -8,30 +8,40 @@ const MIN_PARTIAL_MATCH = 4;
 
 const toMs = (date) => new Date(date).getTime();
 
-function merchantsCompatible(a, b) {
+// Слова, по которым получателей сравнивать нельзя: домены, правовые формы, платёжные шлюзы.
+const GENERIC_WORDS = new Set(['www', 'com', 'net', 'org', 'тоо', 'too', 'ооо', 'ип', 'llp', 'ltd', 'llc', 'inc', 'jetpay', 'cloudpayments', 'payment', 'pay']);
+const words = (value) => value.split(' ').filter((w) => w.length >= 3 && !/^\d+$/.test(w) && !GENERIC_WORDS.has(w));
+
+/** Получатели не противоречат друг другу: один пуст, один входит в другой или есть общее слово. */
+export function merchantsCompatible(a, b) {
   const x = normalizeMerchant(a);
   const y = normalizeMerchant(b);
-  return !x || !y || x === y || x.includes(y) || y.includes(x);
+  if (!x || !y || x === y || x.includes(y) || y.includes(x)) return true;
+  const other = new Set(words(y));
+  return words(x).some((w) => other.has(w));
 }
 
 /**
  * Ищет уже созданную автоматически операцию о той же покупке из ДРУГОГО источника:
- * те же сумма, валюта и тип, близкое время, не противоречащий получатель.
- * Две одинаковые записи из одного источника — это две покупки, они не сливаются.
+ * те же сумма, валюта и тип, близкое время.
+ * Получатель сверяется, но Apple Pay и банк часто пишут его по-разному («Dodo Pizza» и
+ * «Jetpay.kz*dodo.kz»): если в окне ровно одна такая операция, она считается той же покупкой
+ * даже при несовпадающем получателе. Две одинаковые записи из одного источника — это две покупки.
  */
 export function findDuplicate(candidate, txs, { windowMs = DEDUP_WINDOW_MS } = {}) {
   const at = toMs(candidate.date);
-  let best = null;
-  let bestGap = Infinity;
+  const near = [];
   for (const tx of txs) {
     if (tx.deleted || !Array.isArray(tx.sources) || tx.sources.length === 0) continue; // ручные не трогаем
     if (tx.sources.includes(candidate.source)) continue;
     if (tx.amount !== candidate.amount || tx.currency !== candidate.currency || tx.type !== candidate.type) continue;
     const gap = Math.abs(toMs(tx.date) - at);
-    if (gap > windowMs || !merchantsCompatible(tx.merchant, candidate.merchant)) continue;
-    if (gap < bestGap) { best = tx; bestGap = gap; }
+    if (gap <= windowMs) near.push({ tx, gap });
   }
-  return best;
+  near.sort((a, b) => a.gap - b.gap);
+  const compatible = near.find(({ tx }) => merchantsCompatible(tx.merchant, candidate.merchant));
+  if (compatible) return compatible.tx;
+  return near.length === 1 ? near[0].tx : null;
 }
 
 // ---------- автокатегория «получатель → категория» ----------

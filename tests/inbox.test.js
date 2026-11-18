@@ -6,10 +6,11 @@ import { openDb } from '../js/db.js';
 import { seedIfEmpty, clearDemo } from '../js/seed.js';
 import { newParseRule } from '../js/parser.js';
 import {
-  findDuplicate, categoryForMerchant, learnMerchant, processInbox, reviewCounts, DEDUP_WINDOW_MS,
+  findDuplicate, merchantsCompatible, categoryForMerchant, learnMerchant, processInbox, reviewCounts, DEDUP_WINDOW_MS,
 } from '../js/inbox.js';
 import { syncNow, createTransport } from '../js/sync.js';
 import { createGas } from './helpers/gas.js';
+import { FREEDOM_PRESET as FREEDOM, addPreset as addRules } from '../js/parser.js';
 
 const NOW = new Date(2026, 10, 13, 15, 0, 0).getTime();
 
@@ -56,7 +57,6 @@ test('findDuplicate: что не считается дублем', () => {
   assert.equal(findDuplicate(candidate({ amount: 450100 }), [existing()]), null, 'другая сумма');
   assert.equal(findDuplicate(candidate({ currency: 'USD' }), [existing()]), null, 'другая валюта');
   assert.equal(findDuplicate(candidate({ type: 'income' }), [existing()]), null, 'другой тип');
-  assert.equal(findDuplicate(candidate({ merchant: 'KFC' }), [existing()]), null, 'другой получатель');
   assert.equal(findDuplicate(candidate(), [existing({ deleted: true })]), null, 'удалённая операция');
   assert.equal(findDuplicate(candidate({ source: 'applepay' }), [existing()]), null,
     'тот же источник: две одинаковые покупки подряд — это две операции');
@@ -68,6 +68,36 @@ test('findDuplicate: получатель неизвестен с одной с�
   assert.equal(findDuplicate(candidate(), [existing({ merchant: '' })])?.id, 't1');
   const two = [existing({ id: 'far', date: '2026-11-13T14:07:00' }), existing({ id: 'near', date: '2026-11-13T14:11:00' })];
   assert.equal(findDuplicate(candidate(), two).id, 'near');
+});
+
+test('findDuplicate: Apple Pay и банк пишут получателя по-разному', () => {
+  const dodo = existing({ merchant: 'Dodo Pizza' });
+  assert.equal(findDuplicate(candidate({ merchant: 'Jetpay.kz*dodo.kz' }), [dodo])?.id, 't1', 'общее слово dodo');
+  assert.equal(findDuplicate(candidate({ merchant: 'KFC' }), [existing()])?.id, 't1',
+    'единственная операция с той же суммой в окне — та же покупка, даже если получатель не похож');
+  const two = [existing({ id: 'a', merchant: 'Magnum' }), existing({ id: 'b', merchant: 'Small' })];
+  assert.equal(findDuplicate(candidate({ merchant: 'KFC' }), two), null, 'две неподходящие — непонятно какая, не сливаем');
+  assert.equal(findDuplicate(candidate({ merchant: 'SMALL TOO' }), two)?.id, 'b', 'подходящая по получателю важнее ближайшей');
+});
+test('merchantsCompatible: служебные слова и домены не считаются общими', () => {
+  assert.equal(merchantsCompatible('Jetpay.kz*dodo.kz', 'Dodo Pizza'), true);
+  assert.equal(merchantsCompatible('Jetpay.kz*kfc.kz', 'Jetpay.kz*dodo.kz'), false, 'jetpay и kz — не общее слово');
+  assert.equal(merchantsCompatible('TOO Magnum', 'TOO Small'), false);
+  assert.equal(merchantsCompatible('', 'KFC'), true);
+});
+test('processInbox: Apple Pay и уведомление Freedom о той же покупке — одна операция', async () => {
+  const db = await device();
+  await addRules(db, FREEDOM);
+  await db.put('accounts', { id: 'dep', name: 'Freedom', currency: 'KZT', hint: '6666', order: 0, deleted: false, hidden: false });
+  await db.putMany('inbox', [
+    pay({ id: 'ap', time: '2026-11-18T13:05:10', text: 'Dodo Pizza', payload: { amount: '1 123,00 ₸', merchant: 'Dodo Pizza', card: 'Freedom' } }),
+    inboxItem({ id: 'nt', time: '2026-11-18T13:05:40', text: 'Покупка Jetpay.kz*dodo.kz -1 123 ₸\nДоступно 1 123 123,12 ₸\nСписано с Deposit Card **6666' }),
+  ]);
+  const result = await processInbox(db, { now: NOW });
+  assert.deepEqual([result.created, result.merged, result.unparsed], [1, 1, 0]);
+  const txs = await live(db);
+  assert.equal(txs.length, 1);
+  assert.deepEqual([txs[0].amount, txs[0].sources.sort()], [112300, ['applepay', 'notification']]);
 });
 
 // ---------- автокатегория ----------

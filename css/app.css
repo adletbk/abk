@@ -1102,3 +1102,5 @@ svg.icon { display: block; flex: none; }
 .plan-seg button { flex: 1; min-height: 36px; border-radius: 9px; color: var(--text-2); font-size: 13px; }
 .plan-seg button[aria-pressed="true"] { background: #404040; color: var(--text); }
 .plan-date { flex: none; width: auto; max-width: 60%; color-scheme: dark; }
+.plan-clear { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-left: 6px; border-radius: 50%; background: var(--card); color: var(--text-2); }
+.form-card:has(> .form-line[hidden]:only-child) { display: none; }

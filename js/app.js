@@ -11,6 +11,7 @@ import { renderBackup } from './ui/backup.js';
 import { renderSync, renderInbox, scheduleSync } from './ui/sync.js';
 import { renderReview, renderRules } from './ui/review.js';
 import { processInbox } from './inbox.js';
+import { FREEDOM_HISTORY, FREEDOM_PRESET, upgradePreset } from './parser.js';
 import { renderImport } from './ui/import.js';
 import { renderInsights, renderDay } from './ui/insights.js';
 import { renderPlanned } from './ui/planned.js';
@@ -83,7 +84,8 @@ async function main() {
   };
 
   // Записи, которые забрали из таблицы, но не успели разобрать (приложение закрыли).
-  await processInbox(db).catch((error) => console.warn('разбор входящих', error));
+  const upgraded = await upgradePreset(db, FREEDOM_PRESET, FREEDOM_HISTORY).catch(() => 0);
+  await processInbox(db, { retry: upgraded > 0 }).catch((error) => console.warn('разбор входящих', error));
 
   window.addEventListener('hashchange', () => { window.scrollTo(0, 0); ctx.render(); });
   await ctx.render();

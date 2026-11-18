@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  newPlanned, validatePlanned, occurrences, statusOf, schedule, overdue, scheduleSummary, markPlanned, monthGrid, monthRange,
+  newPlanned, validatePlanned, occurrences, isLastOccurrence, statusOf, schedule, overdue, scheduleSummary, markPlanned, monthGrid, monthRange,
 } from '../js/planned.js';
 
 const NOW = new Date(2026, 10, 16, 12, 0, 0).getTime();
@@ -51,6 +51,23 @@ test('ежегодный платёж: 29 февраля в невисокосн
   const p = plan({ repeat: 'year', start: '2024-02-29' });
   assert.deepEqual(occurrences(p, '2024-01-01', '2028-12-31'), ['2024-02-29', '2025-02-28', '2026-02-28', '2027-02-28', '2028-02-29']);
   assert.deepEqual(occurrences(p, '2026-03-01', '2026-12-31'), []);
+});
+
+test('месяц последнего платежа ограничивает повторы', () => {
+  const p = plan({ repeat: 'month', until: '2027-03' });
+  assert.deepEqual(validatePlanned(p), []);
+  assert.deepEqual(occurrences(p, '2026-11-01', '2027-12-31'), ['2026-11-10', '2026-12-10', '2027-01-10', '2027-02-10', '2027-03-10']);
+  assert.deepEqual(occurrences(p, '2027-04-01', '2027-04-30'), []);
+  assert.equal(isLastOccurrence(p, '2027-03-10'), true);
+  assert.equal(isLastOccurrence(p, '2027-02-10'), false);
+  assert.equal(isLastOccurrence(plan(), '2027-03-10'), false, 'без конца');
+  const weekly = plan({ repeat: 'week', start: '2026-11-03', until: '2026-11' });
+  assert.deepEqual(occurrences(weekly, '2026-11-01', '2026-12-31'), ['2026-11-03', '2026-11-10', '2026-11-17', '2026-11-24']);
+  assert.equal(isLastOccurrence(weekly, '2026-11-24'), true);
+  assert.deepEqual(occurrences(plan({ repeat: 'once', until: '2026-01' }), '2026-11-01', '2026-11-30'), ['2026-11-10'], 'у разового не учитывается');
+  assert.ok(validatePlanned(plan({ until: '2026-10' })).includes('Последний платёж раньше первого'));
+  assert.ok(validatePlanned(plan({ until: '2026-1' })).includes('Последний платёж: выберите месяц'));
+  assert.deepEqual(validatePlanned(plan({ until: '2026-11' })), [], 'тот же месяц — один платёж');
 });
 
 test('состояние: к оплате, просрочен, оплачен, пропущен', () => {
