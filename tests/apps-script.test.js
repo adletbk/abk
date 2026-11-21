@@ -506,3 +506,54 @@ test('setupWidget(): создаёт отдельный токен, повтор�
   assert.notEqual(gas.props.get('WIDGET_TOKEN'), token);
   assert.equal(gas.call({ action: 'summary', today: '2026-11-18' }, token).error, 'unauthorized');
 });
+
+// ---------- Android (MacroDroid): поля формы ----------
+
+test('add полями формы: заголовок и текст уведомления, кавычки и переносы не ломают запрос', () => {
+  const gas = createGas();
+  const res = gas.form({ token: 'test-token', action: 'add', source: 'notification', title: 'Покупка "Кафе №1"', text: '-1 123 ₸\nДоступно 10 ₸' });
+  assert.deepEqual([res.ok, res.duplicate], [true, false]);
+  const [row] = gas.sheet('inbox').objects();
+  assert.equal(row['Текст'], 'Покупка "Кафе №1"\n-1 123 ₸\nДоступно 10 ₸');
+  assert.equal(row['Источник'], 'notification');
+});
+
+test('add полями формы: без верного токена отказ; через форму нельзя ничего, кроме add', () => {
+  const gas = createGas();
+  assert.equal(gas.form({ token: 'wrong', action: 'add', source: 'notification', text: 'x' }).error, 'unauthorized');
+  assert.equal(gas.form({ action: 'add', source: 'notification', text: 'x' }).ok, false);
+  for (const action of ['pull', 'upsert', 'delete', 'summary', 'ping']) {
+    const res = gas.form({ token: 'test-token', action, store: 'transactions', ids: 'x', today: '2026-11-18' });
+    assert.equal(res.ok, false, action);
+  }
+  assert.equal(gas.sheet('inbox')?.objects().length ?? 0, 0);
+});
+
+test('add: заголовок, который уже стоит первой строкой текста, не дублируется', () => {
+  const gas = createGas();
+  gas.form({ token: 'test-token', action: 'add', source: 'notification', title: 'Покупка Shop', text: 'Покупка Shop\n-5 ₸' });
+  gas.form({ token: 'test-token', action: 'add', source: 'notification', title: 'Покупка Shop2', text: '' });
+  assert.deepEqual(gas.sheet('inbox').objects().map((r) => r['Текст']), ['Покупка Shop\n-5 ₸', 'Покупка Shop2']);
+});
+
+test('add: то же уведомление банка дважды за минуту — одна запись; через минуту — новая', () => {
+  const gas = createGas();
+  const fields = { token: 'test-token', action: 'add', source: 'notification', title: 'Покупка Shop', text: '-5 ₸\nДоступно 100 ₸' };
+  const first = gas.form(fields);
+  gas.tick(30 * 1000);
+  const second = gas.form(fields);
+  assert.deepEqual([second.duplicate, second.id], [true, first.id]);
+  gas.tick(61 * 1000);
+  assert.equal(gas.form(fields).duplicate, false, 'через минуту — возможно, новая покупка');
+  assert.equal(gas.sheet('inbox').objects().length, 2);
+});
+
+test('add полями формы: Android-уведомление разбирается теми же правилами Freedom', async () => {
+  const { FREEDOM_PRESET, newParseRule, parseInboxItem } = await import('../js/parser.js');
+  const gas = createGas();
+  gas.form({ token: 'test-token', action: 'add', source: 'notification', title: 'Покупка Shop', text: '-2 650 ₸\nДоступно 1 324 930,27 ₸\nСписано с Deposit Card **0000' });
+  const [item] = gas.call({ action: 'pull', since: 0 }).inbox;
+  const rules = FREEDOM_PRESET.map((f, order) => newParseRule({ ...f, order }, 1));
+  const parsed = parseInboxItem(item, { rules, accounts: [{ id: 'dep', name: 'Freedom', hint: '0000' }], defaultAccountId: null });
+  assert.deepEqual([parsed.ok, parsed.fields.amount, parsed.fields.merchant, parsed.fields.account_id], [true, 265000, 'Shop', 'dep']);
+});

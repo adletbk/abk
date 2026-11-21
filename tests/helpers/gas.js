@@ -152,6 +152,12 @@ export function createGas({ token = 'test-token' } = {}) {
     /** Вызов действия с токеном по умолчанию. */
     // Второй аргумент заменяет токен; явный undefined означает «без токена».
     call: (body, ...rest) => post(JSON.stringify({ token: rest.length ? rest[0] : token, ...body })).json,
+    /** Запрос полями формы, как его присылает MacroDroid: Apps Script кладёт их в e.parameter. */
+    form: (fields) => {
+      const contents = new URLSearchParams(fields).toString();
+      const output = context.doPost({ postData: { contents, type: 'application/x-www-form-urlencoded' }, parameter: { ...fields } });
+      return JSON.parse(output.content);
+    },
     log: () => context.Logger.lines,
   };
 }

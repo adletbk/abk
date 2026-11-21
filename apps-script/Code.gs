@@ -21,6 +21,7 @@ var MAX_BODY_BYTES = 2 * 1024 * 1024;
 var MAX_BATCH = 500;
 var MAX_TEXT = 4000;
 var LOCK_WAIT_MS = 20000;
+var REPEAT_WINDOW_MS = 60 * 1000;
 var SUMMARY_SHEET = 'Сводка по месяцам';
 var SUMMARY_CURRENCY = 'KZT';
 // Служебные категории корректировки остатка: в доходы и расходы не входят (как в приложении).
@@ -235,8 +236,23 @@ function parseBody(e) {
     var body = JSON.parse(contents);
     return body !== null && typeof body === 'object' && !Array.isArray(body) ? body : null;
   } catch (err) {
-    return null;
+    return formBody(e);
   }
+}
+
+/**
+ * Поля формы (application/x-www-form-urlencoded) вместо JSON: так присылает MacroDroid на Android.
+ * Значения кодирует сам MacroDroid, поэтому кавычки и переносы строк в тексте уведомления
+ * запрос не ломают. Через форму можно только добавить запись во входящие.
+ */
+function formBody(e) {
+  var p = e && e.parameter;
+  if (!p || typeof p.token !== 'string' || p.action !== 'add') return null;
+  var body = { token: p.token, action: 'add' };
+  ['source', 'text', 'title', 'time', 'id'].forEach(function (key) {
+    if (typeof p[key] === 'string') body[key] = p[key];
+  });
+  return body;
 }
 
 /** Сравнение без раннего выхода: время не зависит от того, где строки расходятся. */
@@ -270,6 +286,9 @@ function actionAdd(body, now) {
   var source = body.source;
   var payload = body.payload !== null && typeof body.payload === 'object' ? JSON.stringify(body.payload) : '';
   var rawText = typeof body.text === 'string' ? body.text.trim() : '';
+  // Заголовок уведомления отдельным полем (Android): ставится первой строкой, как в Командах iOS.
+  var title = typeof body.title === 'string' ? body.title.trim() : '';
+  if (title && rawText.indexOf(title) !== 0) rawText = rawText ? title + '\n' + rawText : title;
   var time = typeof body.time === 'string' ? body.time.trim() : '';
   if (INBOX_SOURCES.indexOf(source) === -1) throw new ApiError('bad_request', 'Неизвестный источник.');
   if (!rawText && !payload) throw new ApiError('bad_request', 'Пустой текст.');
@@ -282,6 +301,12 @@ function actionAdd(body, now) {
   for (var i = 0; i < table.objects.length; i++) {
     var row = table.objects[i];
     if ((body.id && row.id === body.id) || (fingerprint && row.fingerprint === fingerprint)) {
+      return { ok: true, id: text(row.id), duplicate: true };
+    }
+    // Android может прислать одно и то же уведомление дважды (оно обновилось). Уведомление банка
+    // о новой покупке отличается хотя бы остатком, поэтому тот же текст за минуту — повтор.
+    if (!time && source === 'notification' && text(row['Источник']) === source && text(row['Текст']) === rawText
+      && text(row.payload) === payload && now - Date.parse(text(row['Получено'])) < REPEAT_WINDOW_MS) {
       return { ok: true, id: text(row.id), duplicate: true };
     }
   }
