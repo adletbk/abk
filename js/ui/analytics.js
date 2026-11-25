@@ -10,6 +10,8 @@ import { TYPE_LABELS, todayKey } from '../model.js';
 import { monthSummary, excludedAccountIds } from '../selectors.js';
 import { monthSeries, categoryBreakdown, stackedSeries, roundTo } from '../analytics.js';
 import { rollupId } from '../catalog.js';
+import { NO_CATEGORY, categoryHash } from './category.js';
+import { shareText } from '../category-report.js';
 
 const VIEWS = {
   pie: { label: 'Круговая', icon: 'pie' },
@@ -17,7 +19,6 @@ const VIEWS = {
   stacked: { label: 'Столбцы по дням', icon: 'bars' },
   sankey: { label: 'Потоки', icon: 'flow' },
 };
-const NO_CATEGORY = { name: 'Без категории', color: '#A3A3A3', icon: 'dots' };
 
 export async function renderAnalytics(root, ctx) {
   const { db, state } = ctx;
@@ -42,6 +43,11 @@ export async function renderAnalytics(root, ctx) {
   const total = shown.reduce((sum, row) => sum + row.amount, 0);
   const largest = rows[0]?.amount ?? 0;
 
+  // Выделенный сектор круговой диаграммы; сбрасывается, если категории больше нет среди показанных.
+  const pickedIndex = state.analyticsPick === undefined ? -1 : shown.findIndex((row) => row.category_id === state.analyticsPick);
+  const pickedRow = shown[pickedIndex] ?? null;
+  const openCategory = (id) => { state.categoryView = null; ctx.navigate(categoryHash(id)); };
+
   async function pickView() {
     const picked = await pickSheet({
       title: 'Вид отчёта', selected: state.chartType,
@@ -60,7 +66,7 @@ export async function renderAnalytics(root, ctx) {
   const typeSeg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Что показывать' },
     [['income', 'arrow-in'], ['expense', 'arrow-out']].map(([value, glyph]) => h('button', {
       type: 'button', class: `seg-${value}`, 'aria-label': TYPE_LABELS[value], 'aria-pressed': String(type === value),
-      onClick: () => { state.analyticsType = value; off.clear(); ctx.render(); },
+      onClick: () => { state.analyticsType = value; state.analyticsPick = undefined; off.clear(); ctx.render(); },
     }, icon(glyph, 22), type === value && h('span', { text: TYPE_LABELS[value] }))));
   const controls = h('div', { class: 'analytics-controls' }, typeSeg,
     periodControl(ctx, period, today));
@@ -69,7 +75,17 @@ export async function renderAnalytics(root, ctx) {
   let chart;
   if (state.chartType === 'pie') {
     chart = renderDonut(shown.map((row) => ({ share: row.amount / total, color: info(row.category_id).color, icon: info(row.category_id).icon })),
-      { label: 'Всего', value: formatMoney(total), makeIcon: icon });
+      {
+        label: pickedRow ? info(pickedRow.category_id).name : 'Всего',
+        value: formatMoney(pickedRow ? pickedRow.amount : total),
+        note: pickedRow ? `${shareText(pickedRow.amount / total)} ${type === 'income' ? 'доходов' : 'расходов'}` : null,
+        makeIcon: icon, selected: pickedIndex,
+        onPick: (index) => { state.analyticsPick = index === pickedIndex ? undefined : shown[index].category_id; ctx.render(); },
+      });
+    if (pickedRow) {
+      chart = h('div', {}, chart, h('button', { type: 'button', class: 'donut-open', onClick: () => openCategory(pickedRow.category_id) },
+        h('span', { text: `${type === 'income' ? 'Показать доходы' : 'Показать траты'}: ${info(pickedRow.category_id).name}` }), icon('chevron-right', 18)));
+    }
   } else if (state.chartType === 'line') {
     const series = monthSeries(txs, period, base);
     const summary = monthSummary(txs, period, base);
@@ -110,11 +126,16 @@ export async function renderAnalytics(root, ctx) {
       const pill = h('span', { class: 'cat-pill' }, icon(category.icon, 20), h('span', { text: category.name }));
       pill.style.setProperty('--c', category.color);
       pill.style.setProperty('--w', `${Math.max(8, Math.round((row.amount / largest) * 100))}%`);
-      return h('button', {
-        type: 'button', class: 'item analytics-row' + (on ? '' : ' off'), 'aria-pressed': String(on),
-        onClick: () => { if (on) off.add(row.category_id); else off.delete(row.category_id); ctx.render(); },
-      }, h('span', { class: 'cat-pill-wrap' }, pill),
-      h('span', { class: 'analytics-amount', text: formatMoney(row.amount) }), check(on));
+      // Две кнопки в строке: категория открывает свои операции, галочка включает её в диаграмму.
+      return h('div', { class: 'item analytics-row' + (on ? '' : ' off') },
+        h('button', { type: 'button', class: 'analytics-open', onClick: () => openCategory(row.category_id) },
+          h('span', { class: 'cat-pill-wrap' }, pill),
+          h('span', { class: 'analytics-amount', text: formatMoney(row.amount) }),
+          h('span', { class: 'item-chevron' }, icon('chevron-right', 18))),
+        h('button', {
+          type: 'button', class: 'analytics-check', 'aria-pressed': String(on), 'aria-label': `Показывать в диаграмме: ${category.name}`,
+          onClick: () => { if (on) off.add(row.category_id); else off.delete(row.category_id); ctx.render(); },
+        }, check(on)));
     }));
 
   clear(root).append(h('div', { class: 'screen' }, top, controls, chart,

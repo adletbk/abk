@@ -15,6 +15,7 @@ import { FREEDOM_HISTORY, FREEDOM_PRESET, upgradePreset } from './parser.js';
 import { renderImport } from './ui/import.js';
 import { renderInsights, renderDay } from './ui/insights.js';
 import { renderPlanned } from './ui/planned.js';
+import { renderCategory } from './ui/category.js';
 
 const SCREENS = {
   analytics: renderAnalytics,
@@ -65,6 +66,7 @@ async function main() {
       const add = location.hash.match(/^#\/add(?:\/([\w-]+))?(?:\?(t|inbox|plan)=([\w-]+))?$/);
       const screen = SCREENS[location.hash.slice(2)];
       const day = location.hash.match(/^#\/day\/(\d{4}-\d{2}-\d{2})$/);
+      const category = location.hash.match(/^#\/category\/([\w-]+)$/);
       const target = document.createElement('div');
       if (add) {
         await renderAdd(target, ctx, {
@@ -75,6 +77,7 @@ async function main() {
         });
       }
       else if (day) await renderDay(target, ctx, day[1]);
+      else if (category) await renderCategory(target, ctx, category[1]);
       else if (screen) await screen(target, ctx);
       else await renderHome(target, ctx);
       if (seq !== renderSeq) return; // пришёл более новый рендер

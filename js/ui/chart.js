@@ -116,17 +116,18 @@ export function ringSegment(cx, cy, outer, inner, a0, a1) {
 
 /**
  * Кольцо по категориям. items: [{ share, color, icon }]. makeIcon(name, size) — фабрика иконок.
- * В центре — подпись и сумма (обычная разметка поверх SVG).
+ * В центре — подпись, сумма и необязательная строка note (обычная разметка поверх SVG).
+ * onPick(index) — нажатие на сектор; selected — номер выделенного сектора или -1.
  */
-export function renderDonut(items, { label, value, makeIcon }) {
+export function renderDonut(items, { label, value, note = null, makeIcon, selected = -1, onPick = null }) {
   const SIZE = 300, C = 150, OUTER = 144, INNER = 92;
   const GAP = items.length > 1 ? 0.035 : 0;
-  const root = svg('svg', { class: 'donut', viewBox: `0 0 ${SIZE} ${SIZE}`, role: 'img', 'aria-label': 'Доли категорий' });
+  const root = svg('svg', { class: 'donut' + (selected >= 0 ? ' picked' : '') + (onPick ? ' tappable' : ''), viewBox: `0 0 ${SIZE} ${SIZE}`, role: 'img', 'aria-label': 'Доли категорий' });
   if (items.length === 0) {
     root.append(svg('circle', { class: 'donut-empty', cx: C, cy: C, r: (OUTER + INNER) / 2, 'stroke-width': OUTER - INNER }));
   }
   let angle = 0;
-  for (const item of items) {
+  for (const [index, item] of items.entries()) {
     const sweep = item.share * Math.PI * 2;
     // Полный круг одной дугой не рисуется: делим на две половины.
     const parts = sweep > Math.PI * 1.999
@@ -135,8 +136,10 @@ export function renderDonut(items, { label, value, makeIcon }) {
     let middle = null;
     for (const [a0, a1] of parts) {
       const seg = ringSegment(C, C, OUTER, INNER, a0, a1);
-      const area = svg('path', { class: 'donut-area', d: seg.area });
-      const edge = svg('path', { class: 'donut-edge', d: seg.edge });
+      const on = index === selected ? ' on' : '';
+      const area = svg('path', { class: `donut-area${on}`, d: seg.area });
+      const edge = svg('path', { class: `donut-edge${on}`, d: seg.edge });
+      if (onPick) for (const el of [area, edge]) el.addEventListener('click', () => onPick(index));
       area.style.setProperty('--c', item.color);
       edge.style.setProperty('--c', item.color);
       root.append(area, edge);
@@ -146,14 +149,15 @@ export function renderDonut(items, { label, value, makeIcon }) {
       const glyph = makeIcon(item.icon, 20);
       glyph.setAttribute('x', num(middle[0] - 10));
       glyph.setAttribute('y', num(middle[1] - 10));
-      glyph.setAttribute('class', 'donut-icon');
+      glyph.setAttribute('class', `donut-icon${index === selected ? ' on' : ''}`);
       glyph.style.setProperty('--c', item.color);
       root.append(glyph);
     }
     angle += sweep;
   }
   return h('div', { class: 'donut-wrap' }, root,
-    h('div', { class: 'donut-center' }, h('span', { class: 'donut-label', text: label }), h('span', { class: 'donut-value', text: value })));
+    h('div', { class: 'donut-center' }, h('span', { class: 'donut-label', text: label }), h('span', { class: 'donut-value', text: value }),
+      note && h('span', { class: 'donut-label', text: note })));
 }
 
 // ---------- столбцы по дням ----------
