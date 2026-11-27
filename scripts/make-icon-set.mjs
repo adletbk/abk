@@ -13,12 +13,12 @@ const version = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8')).v
 const GROUPS = [
   ['Финансы', 'wallet credit-card banknote coins piggy-bank landmark receipt hand-coins badge-percent chart-line vault circle-dollar-sign banknote-arrow-up banknote-arrow-down wallet-cards wallet-minimal receipt-text chart-pie chart-column trending-up trending-down badge-dollar-sign circle-percent bitcoin dollar-sign euro russian-ruble pound-sterling japanese-yen scale nfc qr-code arrow-left-right briefcase-business hand-helping'],
   ['Еда', 'shopping-basket shopping-cart utensils coffee pizza beer wine cake-slice apple sandwich ice-cream-cone cup-soda croissant egg-fried fish carrot beef salad soup cookie donut candy milk drumstick ham cherry grape banana citrus wheat chef-hat cooking-pot utensils-crossed martini glass-water bottle-wine hamburger ice-cream-bowl lollipop popsicle'],
-  ['Транспорт', 'car bus train-front plane bike fuel car-taxi-front ship truck tram-front map-pin car-front bus-front plane-landing motorbike ev-charger traffic-cone sailboat rocket cable-car navigation route train-track'],
-  ['Дом', 'house sofa bed lamp bath washing-machine wrench hammer plug lightbulb key-round paint-roller droplets flame wifi tv door-open armchair refrigerator microwave air-vent heater fan bed-double shower-head toilet spray-can lamp-desk lamp-floor blinds router satellite-dish fence house-plug drill construction'],
-  ['Покупки', 'shopping-bag shirt gift gem watch glasses package tag store scissors smartphone laptop headphones footprints tablet monitor keyboard mouse speaker gamepad barcode ticket-percent crown sparkles brush handbag'],
-  ['Здоровье', 'heart-pulse pill stethoscope syringe activity hospital dna cross thermometer bandage brain eye tablets ambulance microscope ear briefcase-medical cigarette scan-heart'],
+  ['Транспорт', 'car bus train-front plane bike fuel car-taxi-front ship truck tram-front map-pin car-front bus-front plane-landing motorbike ev-charger traffic-cone sailboat rocket cable-car navigation route train-track parking-meter scooter ticket-check'],
+  ['Дом', 'house sofa bed lamp bath washing-machine wrench hammer plug lightbulb key-round paint-roller droplets flame wifi tv door-open armchair refrigerator microwave air-vent heater fan bed-double shower-head toilet spray-can lamp-desk lamp-floor blinds router satellite-dish fence house-plug drill construction lamp-ceiling bed-single house-plus'],
+  ['Покупки', 'shopping-bag shirt gift gem watch glasses package tag store scissors smartphone laptop headphones footprints tablet monitor keyboard mouse speaker gamepad barcode ticket-percent crown sparkles brush handbag smartphone-charging tv-minimal'],
+  ['Здоровье', 'heart-pulse pill stethoscope syringe activity hospital dna cross thermometer bandage brain eye tablets ambulance microscope ear briefcase-medical cigarette scan-heart pill-bottle'],
   ['Спорт', 'dumbbell trophy medal volleyball waves-horizontal mountain target timer biceps-flexed flag person-standing goal'],
-  ['Развлечения', 'gamepad-2 film ticket popcorn drama mic camera palette book-open party-popper dices clapperboard tv-minimal-play guitar piano drum radio book-heart library puzzle ferris-wheel roller-coaster joystick disc-3 theater'],
+  ['Развлечения', 'gamepad-2 film ticket popcorn drama mic camera palette book-open party-popper dices clapperboard tv-minimal-play guitar piano drum radio book-heart library puzzle ferris-wheel roller-coaster joystick disc-3 theater tickets tent-tree'],
   ['Путешествия', 'plane-takeoff luggage map compass tent hotel tree-palm globe sun umbrella mountain-snow binoculars tickets-plane map-pinned earth sunset caravan anchor'],
   ['Семья', 'baby users heart dog cat paw-print bone school graduation-cap backpack heart-handshake user user-round contact cake rabbit bird turtle squirrel church flower-2 blocks toy-brick'],
   ['Работа и учёба', 'briefcase building pen book calculator presentation mail phone printer laptop-minimal notebook-pen pencil ruler award id-card factory warehouse hard-hat code terminal server languages newspaper megaphone'],
@@ -42,6 +42,12 @@ const BRANDS = [
     halyk: [p('M21.500 12l-3 3v3.500H15l-3 3-3-3H5.500V15l-3-3 3-3V5.500H9l3-3 3 3h3.500V9z'), p('M16 8.500c-2.500 0-3.500 1.500-4 3.500s-1.500 3.500-4 3.500')],
     forte: [SQUARE, p('M15.500 7.400h-1.400a4.600 4.600 0 0 0-4.600 4.600'), p('M14.100 11.900a4.600 4.600 0 0 0-4.600 4.600v1')],
     'home-credit': [p('M3.500 17.500H6.700A8 8 0 1 1 17.300 17.500H20.500', { 'stroke-width': '3' }), p('M9 11.500h6a3 3 0 0 1-6 0z', { fill: 'currentColor' })],
+    // Bank CenterCredit: два вложенных треугольника со скруглёнными углами.
+    bcc: [p('M10.300 4.200 3.300 16.100A2 2 0 0 0 5 19.100h14a2 2 0 0 0 1.700-3L13.700 4.200a2 2 0 0 0-3.400 0z'), p('M11.300 9.100 8.300 14.100a.9.9 0 0 0 .8 1.400h5.800a.9.9 0 0 0 .8-1.400l-2.900-5a.9.9 0 0 0-1.500 0z', THIN)],
+    // Alatau City Bank (бывший Jusan): три полосы, сужающиеся книзу.
+    alatau: [p('M4 6.500h16'), p('M6.500 12h11'), p('M9.500 17.500h5')],
+    // Bereke Bank: две полосы-капсулы, верхняя длиннее.
+    bereke: [['rect', { x: '3', y: '5', width: '18', height: '6', rx: '3' }], ['rect', { x: '3', y: '13', width: '12', height: '6', rx: '3' }]],
   }],
   ['Бренды и сервисы', {
     apple: [p('M12 7.5c-1.2-.9-2.4-1.3-3.6-1.3C5.9 6.2 4 8.4 4 11.6c0 4.2 2.6 9.4 5.2 9.4 1 0 1.7-.6 2.8-.6s1.8.6 2.8.6c1.8 0 3.600-2.600 4.600-5.300-1.700-.700-2.700-2.200-2.700-4 0-1.600.800-2.900 2.100-3.700-1-1.200-2.300-1.800-3.600-1.800-1.300 0-2.100.500-3.200 1.300z'), p('M12.200 4.700c.100-1.700 1.400-3.100 3.200-3.200 0 1.800-1.400 3.200-3.200 3.200z')],
@@ -86,6 +92,8 @@ const BRANDS = [
     adidas: [p('M5.500 19l-1.500-2.600', { 'stroke-width': '2.800' }), p('M11.500 19 8 13', { 'stroke-width': '2.800' }), p('M17.500 19 12 9.500', { 'stroke-width': '2.800' })],
     ikea: [['rect', { x: '2', y: '6', width: '20', height: '12', rx: '1.500' }], ['ellipse', { cx: '12', cy: '12', rx: '7.500', ry: '3.800' }]],
     beeline: [ring('9.500'), p('M4 7.500h16'), p('M2.500 12h19'), p('M4 16.500h16')],
+    // Onay: транспортная карта (условный знак).
+    onay: [['rect', { x: '2.500', y: '5', width: '19', height: '14', rx: '3' }], ['circle', { cx: '8', cy: '12', r: '2.600' }], p('M13.500 10h4.500'), p('M13.500 14h3')],
   }],
 ];
 

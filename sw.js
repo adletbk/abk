@@ -4,7 +4,7 @@
 // приложение не увидит обновление. Список SHELL проверяется тестом tests/sw.test.js.
 // Данные пользователя лежат в IndexedDB и при смене версии кеша не затрагиваются.
 
-const VERSION = 'v30';
+const VERSION = 'v32';
 const CACHE = `finance-shell-${VERSION}`;
 
 const SHELL = [

@@ -7,9 +7,12 @@ import { renderChart } from './chart.js';
 import { formatAmount, formatMoney } from '../money.js';
 import { dayKey, dayShort, dayTitle, periodTitle, plural, todayKey } from '../model.js';
 import { monthSummary, excludedAccountIds, accountBalances, totalBalance } from '../selectors.js';
+import { rollupId } from '../catalog.js';
+import { categoryHash } from './category.js';
 import {
   monthSeries, dailyAverage, largestExpense, mostExpensiveDay, noSpendingStreak, weekendShare,
   transactionCount, mostUsedCategory, roundTo, largestIncome, savingsFlow, savedPercent, savedShare, fundCoverage,
+  smallPurchases, busiestWeekday, categoryGrowth,
 } from '../analytics.js';
 
 async function load(ctx) {
@@ -51,6 +54,11 @@ export async function renderInsights(root, ctx) {
   const used = mostUsedCategory(txs, month, opts);
   const count = transactionCount(txs, month, opts);
   const topIncome = largestIncome(txs, month, opts);
+  const small = smallPurchases(txs, month, opts);
+  const weekday = busiestWeekday(txs, month, opts);
+  // Рост считается по категориям верхнего уровня, как в аналитике.
+  const parentOf = new Map([...categoriesById.keys()].map((id) => [id, rollupId(id, categoriesById)]));
+  const growth = categoryGrowth(txs, month, { ...opts, parentOf });
   // Сбережения: счета с отметкой «Сбережения». Отложено = переводы на них минус переводы обратно.
   const savings = allAccounts.filter((a) => a.savings && !a.deleted);
   const flow = savingsFlow(txs, month, { savingsIds: new Set(savings.map((a) => a.id)), accountId: state.accountId });
@@ -62,6 +70,7 @@ export async function renderInsights(root, ctx) {
   const dayName = (day) => dayShort(day, today);
   const category = (id) => categoriesById.get(id) ?? { name: 'Без категории', color: '#A3A3A3', icon: 'dots' };
   const badge = (c) => h('span', { class: 'cat-badge', style: { '--c': c.color } }, icon(c.icon, 22));
+  const growthCategory = growth && category(growth.category_id);
 
   const balanceText = formatMoney(summary.balance);
   let savedText = '';
@@ -143,6 +152,26 @@ export async function renderInsights(root, ctx) {
       title: 'Самая частая категория', glyph: usedCategory ? badge(usedCategory) : null,
       sub: usedCategory ? usedCategory.name : 'трат не было',
       value: used ? `${used.count} ${plural(used.count, ['раз', 'раза', 'раз'])}` : '—',
+    }),
+    growthCategory
+      ? tile({
+        title: 'Выросли траты', accent: 'expense',
+        extra: h('span', { class: 'ins-center' }, badge(growthCategory),
+          h('span', { class: 'ins-name', text: growthCategory.name }),
+          h('span', { class: 'ins-sub', text: growth.percent === null ? 'в прошлом периоде трат не было' : `+${growth.percent}% к прошлому периоду` })),
+        value: `+${formatMoney(growth.delta)}`,
+        onClick: () => { state.analyticsType = 'expense'; state.categoryView = null; ctx.navigate(categoryHash(growth.category_id)); },
+      })
+      : tile({ title: 'Выросли траты', sub: 'ни одна категория не выросла к прошлому периоду', value: '—' }),
+    tile({
+      title: 'Мелкие траты', glyph: icon('lu-coins', 22),
+      sub: small.count ? `${small.count} ${plural(small.count, ['покупка', 'покупки', 'покупок'])} до ${formatMoney(small.limit)}${small.share !== null ? ` — ${small.share}% всех трат` : ''}` : `покупок до ${formatMoney(small.limit)} не было`,
+      value: small.count ? formatMoney(small.amount) : '—',
+    }),
+    tile({
+      title: 'Самый затратный день недели', glyph: icon('calendar', 22),
+      sub: weekday ? `в среднем за ${weekday.name === 'среда' || weekday.name === 'пятница' || weekday.name === 'суббота' ? weekday.name.replace(/а$/, 'у') : weekday.name}` : 'нужно хотя бы две недели данных',
+      value: weekday ? formatMoney(roundTo(weekday.average, 100)) : '—',
     }),
     tile({
       title: 'Запас прочности', glyph: h('span', { class: 'ins-shield' }, icon('lu-shield', 22)),

@@ -3,7 +3,7 @@ import { h, clear, toast } from './dom.js';
 import { icon } from '../icons.js';
 import { screenHeader, listItem } from './screen.js';
 import { openSheet, pickSheet, confirmSheet } from './sheet.js';
-import { formatMoney } from '../money.js';
+import { amountToText, formatMoney, parseMoneyInput } from '../money.js';
 import { TYPE_LABELS, plural } from '../model.js';
 import {
   FREEDOM_PRESET, FREEDOM_HISTORY, upgradePreset, RULE_SOURCES, RULE_TYPES, addPreset, applyRule, escapeRegex, firstLine, matchAccount,
@@ -50,12 +50,17 @@ export async function renderReview(root, ctx) {
       title: 'Неразобранная запись',
       items: [
         { value: 'manual', label: 'Создать операцию вручную', icon: 'plus' },
+        { value: 'fixed', label: 'Записывать такие всегда одинаково', icon: 'bolt' },
         { value: 'rule', label: 'Создать правило по этой записи', icon: 'table' },
         { value: 'ignore', label: 'Это не операция', icon: 'eye-off' },
         { value: 'always', label: 'Всегда скрывать такие записи', icon: 'eye-off', color: '#F87171' },
       ],
     });
     if (picked?.value === 'manual') ctx.navigate(`#/add?inbox=${item.id}`);
+    if (picked?.value === 'fixed') {
+      const saved = await editFixedRule(ctx, { sample: item.text, source: item.source });
+      if (saved) await retry();
+    }
     if (picked?.value === 'rule') {
       const saved = await editRule(ctx, { sample: item.text, source: item.source });
       if (saved) await retry();
@@ -111,7 +116,9 @@ export async function renderRules(root, ctx) {
   const { db } = ctx;
   const [rules, categories] = await Promise.all([db.getAll('rules'), db.getAll('categories')]);
   const categoriesById = new Map(categories.map((c) => [c.id, c]));
-  const parse = rules.filter((r) => r.kind !== 'merchant' && !r.deleted)
+  const accounts = (await db.getAll('accounts')).filter((a) => !a.deleted);
+  const cards = rules.filter((r) => r.kind === 'card' && !r.deleted).sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const parse = rules.filter((r) => (r.kind ?? 'parse') === 'parse' && !r.deleted)
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
   const merchants = rules.filter((r) => r.kind === 'merchant' && !r.deleted).sort((a, b) => a.merchant.localeCompare(b.merchant));
 
@@ -141,13 +148,18 @@ export async function renderRules(root, ctx) {
 
   clear(root).append(h('div', { class: 'screen' },
     screenHeader(ctx, 'Правила разбора'),
-    h('p', { class: 'note-text', text: 'Правило говорит, как достать из текста уведомления сумму, получателя и счёт. Правила применяются по порядку; подходит первое, которое нашло сумму. Готовых правил для банка пока нет: они появятся по вашим образцам уведомлений.' }),
+    h('p', { class: 'note-text', text: 'Правило говорит, как достать из текста уведомления сумму, получателя и счёт. Правила применяются по порядку; подходит первое, которое нашло сумму. Постоянная операция — для уведомлений без суммы: сумму, категорию и заметку вы задаёте сами.' }),
     parse.length
       ? h('div', { class: 'list' }, parse.map((rule) => listItem({
-        iconName: 'table', color: '#60A5FA', label: rule.name,
-        sub: `${RULE_TYPES[rule.type]} · ${rule.sources.map((s) => RULE_SOURCES[s] ?? s).join(', ')}`,
+        iconName: isFixed(rule) ? 'bolt' : 'table', color: isFixed(rule) ? '#FBBF24' : '#60A5FA', label: rule.name,
+        sub: isFixed(rule)
+          ? `Постоянная: ${TYPE_LABELS[rule.type].toLowerCase()} ${formatMoney(rule.fixed_amount)}${rule.category_id ? ` · ${categoriesById.get(rule.category_id)?.name ?? ''}` : ''}`
+          : `${RULE_TYPES[rule.type]} · ${rule.sources.map((s) => RULE_SOURCES[s] ?? s).join(', ')}`,
         tag: rule.enabled === false ? 'выкл' : null,
-        onClick: async () => { if (await editRule(ctx, { rule })) ctx.render(); },
+        onClick: async () => {
+          const changed = isFixed(rule) ? await editFixedRule(ctx, { rule }) : await editRule(ctx, { rule });
+          if (changed) ctx.render();
+        },
       })))
       : h('p', { class: 'empty', text: 'Правил пока нет' }),
     h('button', {
@@ -165,6 +177,27 @@ export async function renderRules(root, ctx) {
       },
     }),
 
+    h('button', {
+      type: 'button', class: 'btn-secondary', text: 'Новая постоянная операция',
+      onClick: async () => { if (await editFixedRule(ctx, {})) ctx.render(); },
+    }),
+
+    h('div', { class: 'group-title', text: 'Карты Apple Pay' }),
+    cards.length
+      ? h('div', { class: 'list' }, cards.map((rule) => listItem({
+        iconName: 'card', color: accounts.find((a) => a.id === rule.account_id)?.color ?? '#60A5FA',
+        label: rule.label || rule.card, right: accounts.find((a) => a.id === rule.account_id)?.name ?? '—',
+        onClick: async () => {
+          const yes = await confirmSheet({
+            title: `Забыть карту «${rule.label || rule.card}»?`,
+            text: 'Покупки по ней снова будут записываться на счёт по названию карты или на последний использованный.',
+            confirmLabel: 'Забыть', danger: true,
+          });
+          if (yes) { await db.softDelete('rules', rule.id); ctx.render(); }
+        },
+      })))
+      : h('p', { class: 'note-text', text: 'Пока пусто. Если покупка Apple Pay записалась не на тот счёт, откройте её и выберите верный: приложение запомнит карту.' }),
+
     h('div', { class: 'group-title', text: 'Получатели и категории' }),
     merchants.length
       ? h('div', { class: 'list' }, merchants.map((rule) => listItem({
@@ -176,6 +209,124 @@ export async function renderRules(root, ctx) {
       : h('p', { class: 'note-text', text: 'Пока пусто. Список пополняется сам, когда вы выбираете категорию у автоматической операции.' }),
     h('button', { type: 'button', class: 'btn-secondary', text: 'Добавить получателя', onClick: addMerchant }),
     merchants.length > 0 && h('p', { class: 'note-text', text: `Запомнено: ${merchants.length} ${plural(merchants.length, ['получатель', 'получателя', 'получателей'])}.` })));
+}
+
+const isFixed = (rule) => !rule.amount && Number.isInteger(rule.fixed_amount) && rule.fixed_amount > 0;
+
+/** Условие «текст содержит …» как выражение: пробелы и переносы строк считаются одинаковыми. */
+const containsPattern = (text) => text.trim().split(/\s+/).map(escapeRegex).join('\\s+');
+
+/**
+ * Постоянная операция: уведомление без суммы (например, «Платежи Билет Onay. Оплата проезда»)
+ * каждый раз записывается одинаково — с суммой, категорией, счётом и заметкой из правила.
+ * Возвращает правило, 'deleted' или null.
+ */
+export function editFixedRule(ctx, { rule = null, sample = '', source = 'notification' } = {}) {
+  const { db } = ctx;
+  return new Promise((resolve) => {
+    let result = null;
+    let categories = [];
+    let accounts = [];
+    const draft = rule ? { ...rule } : newParseRule({
+      name: '', type: 'expense', sources: [source in RULE_SOURCES ? source : 'notification'], order: -1,
+      amount: '', fixed_amount: null, match_text: String(sample).replace(/\s+/g, ' ').trim().slice(0, 120),
+    });
+
+    const field = (label, el) => h('label', { class: 'field' }, h('span', { class: 'field-label', text: label }), el);
+    const matchText = h('textarea', {
+      class: 'field-input field-area', rows: '2', autocapitalize: 'off', spellcheck: 'false', 'aria-label': 'Текст уведомления содержит',
+      placeholder: 'например: Билет Onay',
+    });
+    matchText.value = draft.match_text ?? '';
+    const amount = h('input', {
+      class: 'field-input num', type: 'text', inputmode: 'decimal', placeholder: '0',
+      value: draft.fixed_amount ? amountToText(draft.fixed_amount) : '', autocomplete: 'off', 'aria-label': 'Сумма',
+    });
+    const note = h('input', {
+      class: 'field-input', type: 'text', value: draft.note ?? '', placeholder: 'например: Автобус', maxlength: '200',
+      autocomplete: 'off', 'aria-label': 'Заметка',
+    });
+
+    const types = h('div', { class: 'seg-plain', role: 'group', 'aria-label': 'Тип операции' });
+    const paintTypes = () => clear(types).append(...['expense', 'income'].map((key) => h('button', {
+      type: 'button', text: TYPE_LABELS[key], 'aria-pressed': String(draft.type === key),
+      onClick: () => {
+        if (draft.type === key) return;
+        draft.type = key;
+        if (categories.find((c) => c.id === draft.category_id)?.type !== key) draft.category_id = null;
+        paintTypes(); paintButtons();
+      },
+    })));
+    const categoryButton = h('button', { type: 'button', class: 'btn-secondary', onClick: pickCategory });
+    const accountButton = h('button', { type: 'button', class: 'btn-secondary', onClick: pickAccount });
+    function paintButtons() {
+      categoryButton.textContent = `Категория: ${categories.find((c) => c.id === draft.category_id)?.name ?? 'выбрать'}`;
+      accountButton.textContent = `Счёт: ${accounts.find((a) => a.id === draft.account_id)?.name ?? 'последний использованный'}`;
+    }
+    async function pickCategory() {
+      const picked = await pickSheet({
+        title: 'Категория', selected: draft.category_id,
+        items: categories.filter((c) => c.type === draft.type).map((c) => ({ value: c.id, label: c.name, icon: c.icon, color: c.color })),
+      });
+      if (picked) { draft.category_id = picked.value; paintButtons(); }
+    }
+    async function pickAccount() {
+      const picked = await pickSheet({
+        title: 'Счёт', selected: draft.account_id,
+        items: [{ value: null, label: 'Последний использованный', icon: 'layers' },
+          ...accounts.map((a) => ({ value: a.id, label: a.name, icon: a.icon || 'wallet', color: a.color }))],
+      });
+      if (picked) { draft.account_id = picked.value; paintButtons(); }
+    }
+
+    async function save(patch = {}) {
+      const text = matchText.value.replace(/\s+/g, ' ').trim();
+      const value = parseMoneyInput(amount.value);
+      if (text.length < 3) { toast('Условие: напишите часть текста уведомления'); return; }
+      if (!value || value <= 0) { toast('Введите сумму'); return; }
+      if (!draft.category_id) { toast('Выберите категорию'); return; }
+      Object.assign(draft, patch, {
+        name: (rule?.name && rule.match_text === text ? rule.name : `Постоянная: ${text}`).slice(0, 60),
+        match_text: text, match: containsPattern(text), amount: '', fixed_amount: value, note: note.value.trim(),
+        updated_at: Date.now(),
+      });
+      const errors = validateRule(draft);
+      if (errors.length) { toast(errors[0]); return; }
+      await db.put('rules', draft);
+      result = draft;
+      close();
+    }
+    async function remove() {
+      const yes = await confirmSheet({ title: `Удалить «${rule.name}»?`, text: 'Уже записанные операции останутся.', confirmLabel: 'Удалить', danger: true });
+      if (!yes) return;
+      await db.softDelete('rules', rule.id);
+      result = 'deleted';
+      close();
+    }
+
+    const content = h('div', { class: 'form' },
+      field('Если текст уведомления содержит', matchText),
+      h('div', { class: 'field-label', text: 'Записывать как' }), types,
+      field('Сумма', amount),
+      categoryButton, accountButton,
+      field('Заметка', note),
+      h('p', { class: 'field-hint', text: 'Каждое такое уведомление станет операцией с этими суммой, категорией и заметкой. Если сумма изменится, поправьте её здесь: уже записанные операции не изменятся.' }),
+      h('button', { type: 'button', class: 'btn-primary', text: 'Сохранить', onClick: () => save() }),
+      rule && h('div', { class: 'form-row' },
+        h('button', {
+          type: 'button', class: 'btn-secondary', text: rule.enabled === false ? 'Включить' : 'Выключить',
+          onClick: () => save({ enabled: rule.enabled === false }),
+        }),
+        h('button', { type: 'button', class: 'btn-secondary btn-danger', text: 'Удалить', onClick: remove })));
+
+    paintTypes(); paintButtons();
+    const close = openSheet({ title: rule ? 'Постоянная операция' : 'Новая постоянная операция', content, tall: true, onClose: () => resolve(result) });
+    Promise.all([db.getAll('categories'), db.getAll('accounts')]).then(([allCategories, allAccounts]) => {
+      categories = allCategories.filter((c) => !c.deleted && !c.hidden).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      accounts = allAccounts.filter((a) => !a.deleted && !a.hidden).sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      paintButtons();
+    });
+  });
 }
 
 /** Редактор правила с проверкой на примере. Возвращает правило, 'deleted' или null. */

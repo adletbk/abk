@@ -91,6 +91,12 @@ function regexError(label, source, { needGroup = false } = {}) {
 /** Типы правил: три вида операций и «не операция» (запись скрывается без создания операции). */
 export const RULE_TYPES = { expense: 'Расход', income: 'Доход', transfer: 'Перевод', ignore: 'Не операция' };
 
+/**
+ * Насколько надёжно определён счёт: выше — надёжнее. При слиянии Apple Pay и уведомления банка
+ * побеждает более надёжный; выбранный вручную не меняется никогда.
+ */
+export const ACCOUNT_RANK = { fallback: 0, name: 1, rule: 3, hint: 3, card: 4, manual: 5 };
+
 /** Список проблем правила; пустой список — правило можно сохранять. */
 export function validateRule(rule) {
   if (!String(rule.name ?? '').trim()) return ['Введите название правила'];
@@ -102,6 +108,13 @@ export function validateRule(rule) {
     return matchError ? [matchError] : [];
   }
   if (!rule.amount) {
+    // Постоянная операция: в уведомлении нет суммы (например, «Билет Onay»), сумма задана в правиле.
+    if (Number.isInteger(rule.fixed_amount) && rule.fixed_amount > 0) {
+      if (!rule.match) return ['Для постоянной операции нужно условие'];
+      if (rule.type === 'transfer') return ['Постоянная операция — только доход или расход'];
+      const matchError = regexError('Условие', rule.match) ?? regexError('Счёт', rule.account, { needGroup: true });
+      return matchError ? [matchError] : [];
+    }
     const matchError = regexError('Условие', rule.match);
     return [matchError ?? 'Нужно выражение для суммы'];
   }
@@ -121,6 +134,14 @@ const captured = (match) => (match ? (match[1] ?? match[0] ?? '').trim() : '');
 export function applyRule(rule, text) {
   try {
     if (rule.match && !compile(rule.match).test(text)) return null;
+    if (!rule.amount && Number.isInteger(rule.fixed_amount) && rule.fixed_amount > 0) {
+      if (!rule.match) return null;
+      return {
+        amount: rule.fixed_amount, currency: rule.currency ?? 'KZT', merchant: '',
+        accountText: rule.account ? captured(compile(rule.account).exec(text)) : '',
+        category_id: rule.category_id ?? null, note: rule.note ?? '',
+      };
+    }
     const found = compile(rule.amount).exec(text);
     if (!found) return null;
     const raw = found.groups?.amount ?? found[1] ?? '';
@@ -139,13 +160,26 @@ export function applyRule(rule, text) {
 
 /** Счёт по тексту: сначала по подсказке счёта (например, последние цифры карты), затем по названию. */
 export function matchAccount(text, accounts) {
+  return findAccount(text, accounts)?.id ?? null;
+}
+
+/**
+ * То же, но с надёжностью: { id, rank }. cards — запомненные карты Apple Pay («карта → счёт»),
+ * они надёжнее всего, потому что их подтвердил пользователь. null — счёт не найден.
+ */
+export function findAccount(text, accounts, cards = []) {
   const value = String(text ?? '').toLowerCase();
   if (!value.trim()) return null;
   const candidates = accounts.filter((a) => !a.deleted);
+  const known = normalizeMerchant(text);
+  const card = cards.find((r) => r.kind === 'card' && !r.deleted && r.card === known && candidates.some((a) => a.id === r.account_id));
+  if (card) return { id: card.account_id, rank: ACCOUNT_RANK.card };
   const byHint = candidates.find((a) => a.hint && value.includes(String(a.hint).toLowerCase()));
-  if (byHint) return byHint.id;
-  const byName = candidates.find((a) => a.name?.length >= 3 && value.includes(a.name.toLowerCase()));
-  return byName?.id ?? null;
+  if (byHint) return { id: byHint.id, rank: ACCOUNT_RANK.hint };
+  // Длинное название надёжнее короткого: «Freedom Deposit» раньше, чем «Freedom».
+  const byName = candidates.filter((a) => a.name?.length >= 3 && value.includes(a.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+  return byName ? { id: byName.id, rank: ACCOUNT_RANK.name } : null;
 }
 
 /** Время события записи в местном времени: «ГГГГ-ММ-ДДTЧЧ:ММ:СС». */
@@ -167,17 +201,21 @@ export function eventDate(item, now = Date.now()) {
  */
 export function parseInboxItem(item, { rules, accounts, defaultAccountId }, now = Date.now()) {
   const date = eventDate(item, now);
+  const cards = rules.filter((rule) => rule.kind === 'card');
+  const fallback = { id: defaultAccountId ?? null, rank: ACCOUNT_RANK.fallback };
 
   // Apple Pay: Команда присылает готовые поля, правила не нужны.
   if (item.source === 'applepay' && item.payload && typeof item.payload === 'object') {
     const amount = parseLooseAmount(item.payload.amount);
     if (amount === null) return { ok: false, reason: 'no_amount' };
+    const card = String(item.payload.card ?? '').trim();
+    const account = findAccount(card, accounts, cards) ?? fallback;
     return {
       ok: true, ruleId: null,
       fields: {
         type: 'expense', amount, currency: detectCurrency(item.payload.amount) ?? 'KZT',
         merchant: String(item.payload.merchant ?? '').trim(),
-        account_id: matchAccount(item.payload.card, accounts) ?? defaultAccountId ?? null, date,
+        account_id: account.id, account_rank: account.rank, card, date,
       },
     };
   }
@@ -186,7 +224,7 @@ export function parseInboxItem(item, { rules, accounts, defaultAccountId }, now 
   if (!text) return { ok: false, reason: 'empty' };
 
   const applicable = rules
-    .filter((rule) => rule.kind !== 'merchant' && rule.enabled !== false && !rule.deleted
+    .filter((rule) => (rule.kind ?? 'parse') === 'parse' && rule.enabled !== false && !rule.deleted
       && Array.isArray(rule.sources) && rule.sources.includes(item.source))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name).localeCompare(String(b.name)));
   for (const rule of applicable) {
@@ -198,11 +236,16 @@ export function parseInboxItem(item, { rules, accounts, defaultAccountId }, now 
     }
     const found = applyRule(rule, text);
     if (!found) continue;
+    const account = (rule.account_id && accounts.some((a) => a.id === rule.account_id && !a.deleted)
+      ? { id: rule.account_id, rank: ACCOUNT_RANK.rule } : null)
+      ?? findAccount(found.accountText, accounts) ?? fallback;
     return {
       ok: true, ruleId: rule.id,
       fields: {
         type: rule.type, amount: found.amount, currency: found.currency ?? 'KZT', merchant: found.merchant,
-        account_id: rule.account_id ?? matchAccount(found.accountText, accounts) ?? defaultAccountId ?? null, date,
+        account_id: account.id, account_rank: account.rank, date,
+        ...(found.category_id ? { category_id: found.category_id } : {}),
+        ...(found.note ? { note: found.note } : {}),
       },
     };
   }

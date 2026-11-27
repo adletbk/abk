@@ -248,3 +248,66 @@ export function fundCoverage(funds, expense, days) {
   if (expense <= 0 || days <= 0) return null;
   return Math.max(0, Math.round((funds / ((expense / days) * 30)) * 10) / 10);
 }
+
+// ---------- ещё инсайты ----------
+
+/** Мелкие траты: покупки до limit (минимальные единицы). share — доля от всех трат периода, в процентах. */
+export function smallPurchases(txs, month, opts = {}, limit = 300000) {
+  const all = expensesOf(txs, month, opts);
+  const small = all.filter((tx) => tx.amount <= limit);
+  const total = all.reduce((sum, tx) => sum + tx.amount, 0);
+  const amount = small.reduce((sum, tx) => sum + tx.amount, 0);
+  return { count: small.length, amount, share: total > 0 ? Math.round((amount / total) * 100) : null, limit };
+}
+
+const WEEKDAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота'];
+const weekdayOf = (day) => { const [y, m, d] = day.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d)).getUTCDay(); };
+
+/**
+ * День недели, в который в среднем тратится больше всего: сумма трат за этот день недели,
+ * делённая на число таких дней в прошедшей части периода. Нужно хотя бы две полные недели.
+ */
+export function busiestWeekday(txs, month, opts = {}) {
+  const range = rangeOf(month);
+  const elapsed = elapsedDays(month, opts.today);
+  if (elapsed < 14) return null;
+  const days = new Array(7).fill(0);
+  for (let i = 0; i < elapsed; i++) days[weekdayOf(addDays(range.from, i))]++;
+  const sums = new Array(7).fill(0);
+  const last = addDays(range.from, elapsed - 1);
+  for (const tx of expensesOf(txs, month, opts)) if (tx.date.slice(0, 10) <= last) sums[weekdayOf(tx.date.slice(0, 10))] += tx.amount;
+  let best = null;
+  for (let d = 0; d < 7; d++) {
+    const average = days[d] ? Math.round(sums[d] / days[d]) : 0;
+    if (average > 0 && (!best || average > best.average)) best = { weekday: d, name: WEEKDAYS[d], average };
+  }
+  return best;
+}
+
+/**
+ * Категория, траты в которой выросли сильнее всего по сравнению с таким же отрезком перед периодом.
+ * Для месяца сравнивается с прошлым месяцем; у текущего периода берётся столько же дней от начала.
+ * null, если ничего не выросло или сравнивать не с чем.
+ */
+export function categoryGrowth(txs, month, opts = {}) {
+  const range = rangeOf(month);
+  const elapsed = elapsedDays(month, opts.today);
+  if (elapsed === 0) return null;
+  const isMonth = range.from.endsWith('-01') && range.to === rangeOf(range.from.slice(0, 7)).to;
+  const prevFrom = isMonth ? `${shiftMonth(range.from.slice(0, 7), -1)}-01` : addDays(range.from, -spanDays(range));
+  const prevEnd = isMonth ? rangeOf(shiftMonth(range.from.slice(0, 7), -1)).to : addDays(range.from, -1);
+  const current = { from: range.from, to: addDays(range.from, elapsed - 1) };
+  const cut = addDays(prevFrom, elapsed - 1);
+  const previous = { from: prevFrom, to: cut < prevEnd ? cut : prevEnd };
+  const before = new Map(categoryBreakdown(txs, previous, opts).map((row) => [row.category_id, row.amount]));
+  if (before.size === 0) return null;
+  let best = null;
+  for (const row of categoryBreakdown(txs, current, opts)) {
+    const was = before.get(row.category_id) ?? 0;
+    const delta = row.amount - was;
+    if (delta > 0 && (!best || delta > best.delta)) {
+      best = { category_id: row.category_id, amount: row.amount, previous: was, delta, percent: was > 0 ? Math.round((delta / was) * 100) : null };
+    }
+  }
+  return best;
+}

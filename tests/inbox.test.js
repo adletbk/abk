@@ -329,3 +329,56 @@ test('Freedom + Apple Pay: одна покупка, одна операция; �
   assert.deepEqual(await processInbox(db, { now: NOW + 1 }), { created: 1, merged: 0, review: 0, unparsed: 0, ignored: 0 });
   db.close();
 });
+
+// ---------- счёт при слиянии и запомненные карты ----------
+
+test('processInbox: Apple Pay с неузнанной картой, затем уведомление банка с цифрами карты — счёт из уведомления', async () => {
+  const db = await device();
+  await db.setSetting('last_account_id', 'acc-cash');
+  await db.put('accounts', { id: 'dep', name: 'Deposit', currency: 'KZT', hint: '6666', order: 5, deleted: false, hidden: false });
+  await addRules(db, FREEDOM);
+  await db.put('inbox', pay({ id: 'ap', time: '2026-11-18T13:05:10', text: 'Dodo', payload: { amount: '1 123 ₸', merchant: 'Dodo', card: 'Visa Signature' } }));
+  await processInbox(db, { now: NOW });
+  assert.equal((await live(db))[0].account_id, 'acc-cash', 'карта не узнана — последний использованный счёт');
+  await db.put('inbox', inboxItem({ id: 'nt', time: '2026-11-18T13:05:40', text: 'Покупка Jetpay.kz*dodo.kz -1 123 ₸\nДоступно 10 ₸\nСписано с Deposit Card **6666' }));
+  await processInbox(db, { now: NOW + 1 });
+  const [tx] = await live(db);
+  assert.deepEqual([tx.account_id, tx.account_rank, tx.card], ['dep', 3, 'Visa Signature']);
+  db.close();
+});
+
+test('processInbox: счёт, выбранный вручную, слияние не меняет', async () => {
+  const db = await device();
+  await db.put('accounts', { id: 'dep', name: 'Deposit', currency: 'KZT', hint: '6666', order: 5, deleted: false, hidden: false });
+  await addRules(db, FREEDOM);
+  await db.put('inbox', pay({ id: 'ap', time: '2026-11-18T13:05:10', payload: { amount: '1 123 ₸', merchant: 'Dodo', card: 'Visa' } }));
+  await processInbox(db, { now: NOW });
+  const [first] = await live(db);
+  await db.put('transactions', { ...first, account_id: 'acc-cash', account_rank: 5 });
+  await db.put('inbox', inboxItem({ id: 'nt', time: '2026-11-18T13:05:40', text: 'Покупка Dodo -1 123 ₸\nСписано с Deposit Card **6666' }));
+  await processInbox(db, { now: NOW + 1 });
+  assert.equal((await live(db))[0].account_id, 'acc-cash');
+  db.close();
+});
+
+test('learnCard: исправленный счёт у Apple Pay запоминается для этой карты', async () => {
+  const { learnCard } = await import('../js/inbox.js');
+  const db = await device();
+  await learnCard(db, 'Visa Signature', 'acc-cash');
+  await db.put('inbox', pay({ id: 'ap2', payload: { amount: '500 ₸', merchant: 'Shop', card: 'VISA  signature' } }));
+  await processInbox(db, { now: NOW });
+  const [tx] = await live(db);
+  assert.deepEqual([tx.account_id, tx.account_rank], ['acc-cash', 4]);
+  db.close();
+});
+
+test('processInbox: постоянная операция получает категорию и заметку из правила и сразу готова', async () => {
+  const db = await device();
+  await db.put('rules', newParseRule({ id: 'onay', name: 'Onay', type: 'expense', match: 'Билет\\s+Onay', fixed_amount: 12000, category_id: 'cat-food', note: 'Автобус', order: -1 }, NOW));
+  await db.put('inbox', inboxItem({ id: 'o1', text: 'Платежи\nБилет Onay. Оплата проезда' }));
+  const result = await processInbox(db, { now: NOW });
+  assert.deepEqual([result.created, result.review], [1, 0]);
+  const [tx] = await live(db);
+  assert.deepEqual([tx.amount, tx.category_id, tx.note, tx.status], [12000, 'cat-food', 'Автобус', 'ok']);
+  db.close();
+});

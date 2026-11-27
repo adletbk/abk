@@ -112,7 +112,7 @@ test('parseInboxItem: уведомление разбирается первым
   const parsed = parseInboxItem(item(), { rules, accounts, defaultAccountId: 'cash' });
   assert.deepEqual(parsed, {
     ok: true, ruleId: 'expense',
-    fields: { type: 'expense', amount: 450000, currency: 'KZT', merchant: 'МАГАЗИН-1', account_id: 'card', date: '2026-11-13T14:10:00' },
+    fields: { type: 'expense', amount: 450000, currency: 'KZT', merchant: 'МАГАЗИН-1', account_id: 'card', account_rank: 3, date: '2026-11-13T14:10:00' },
   });
   const income = parseInboxItem(item({ text: 'ТЕСТ: зачисление 520 000 ₸' }), { rules, accounts, defaultAccountId: 'cash' });
   assert.deepEqual([income.fields.type, income.fields.amount, income.fields.account_id], ['income', 52000000, 'cash']);
@@ -144,7 +144,7 @@ test('parseInboxItem: Apple Pay приходит полями и разбира�
   const pay = item({ source: 'applepay', text: 'Кофейня', payload: { amount: '1 500,00 ₸', merchant: 'Кофейня', card: 'Карта *1234' } });
   assert.deepEqual(parseInboxItem(pay, { rules: [], accounts, defaultAccountId: 'cash' }), {
     ok: true, ruleId: null,
-    fields: { type: 'expense', amount: 150000, currency: 'KZT', merchant: 'Кофейня', account_id: 'card', date: '2026-11-13T14:10:00' },
+    fields: { type: 'expense', amount: 150000, currency: 'KZT', merchant: 'Кофейня', account_id: 'card', account_rank: 3, card: 'Карта *1234', date: '2026-11-13T14:10:00' },
   });
 });
 test('parseInboxItem: Apple Pay без суммы идёт на проверку', () => {
@@ -175,7 +175,7 @@ test('правило типа «не операция»: достаточно у
 test('Freedom: покупка с заголовком — сумма, получатель, счёт по цифрам карты', () => {
   const parsed = parseInboxItem(item({ text: PURCHASE }), ctx);
   assert.deepEqual(parsed.fields, {
-    type: 'expense', amount: 1828200, currency: 'KZT', merchant: 'Test cafe', account_id: 'dep', date: '2026-11-13T14:10:00',
+    type: 'expense', amount: 1828200, currency: 'KZT', merchant: 'Test cafe', account_id: 'dep', account_rank: 3, date: '2026-11-13T14:10:00',
   });
 });
 test('Freedom: сумма покупки не путается с остатком «Доступно»', () => {
@@ -227,4 +227,53 @@ test('escapeRegex и firstLine: условие по первой строке з
   assert.equal(firstLine('  Кешбэк за покупку (1+1)\n+159 ₸'), 'Кешбэк за покупку (1+1)');
   assert.equal(new RegExp('^' + escapeRegex('Кешбэк за покупку (1+1)')).test('Кешбэк за покупку (1+1)\n+5'), true);
   assert.equal(new RegExp(escapeRegex('a.b')).test('axb'), false);
+});
+
+// ---------- счёт: надёжность, карты Apple Pay ----------
+
+test('findAccount: запомненная карта, цифры, название (длинное раньше короткого), иначе ничего', async () => {
+  const { findAccount, ACCOUNT_RANK } = await import('../js/parser.js');
+  const list = [
+    { id: 'f', name: 'Freedom', hint: '' }, { id: 'fd', name: 'Freedom Deposit', hint: '6666' }, { id: 'k', name: 'Kaspi Gold', hint: '' },
+  ];
+  assert.deepEqual(findAccount('Freedom Deposit', list), { id: 'fd', rank: ACCOUNT_RANK.name });
+  assert.deepEqual(findAccount('Deposit Card **6666', list), { id: 'fd', rank: ACCOUNT_RANK.hint });
+  assert.equal(findAccount('Halyk', list), null);
+  const cards = [{ kind: 'card', card: 'freedom bank kazakhstan', account_id: 'fd' }];
+  assert.deepEqual(findAccount('Freedom Bank Kazakhstan', list, cards), { id: 'fd', rank: ACCOUNT_RANK.card });
+  assert.deepEqual(findAccount('Freedom Bank Kazakhstan', list, [{ ...cards[0], deleted: true }]), { id: 'f', rank: ACCOUNT_RANK.name });
+});
+
+test('Apple Pay: карта не узнана — счёт по умолчанию с нулевой надёжностью; запомненная карта — нужный счёт', () => {
+  const pay = item({ source: 'applepay', text: 'Кофейня', payload: { amount: '1 500 ₸', merchant: 'Кофейня', card: 'Visa Signature' } });
+  const guess = parseInboxItem(pay, { rules: [], accounts, defaultAccountId: 'cash' });
+  assert.deepEqual([guess.fields.account_id, guess.fields.account_rank, guess.fields.card], ['cash', 0, 'Visa Signature']);
+  const cards = [{ id: 'card:visa signature', kind: 'card', card: 'visa signature', account_id: 'card' }];
+  const known = parseInboxItem(pay, { rules: cards, accounts, defaultAccountId: 'cash' });
+  assert.deepEqual([known.fields.account_id, known.fields.account_rank], ['card', 4]);
+});
+
+// ---------- постоянная операция: уведомление без суммы ----------
+
+test('постоянная операция: сумма, категория и заметка из правила', () => {
+  const onay = newParseRule({
+    name: 'Onay', type: 'expense', match: 'Билет\\s+Onay', fixed_amount: 12000, category_id: 'cat-transport', note: 'Автобус',
+  }, 1);
+  assert.deepEqual(validateRule(onay), []);
+  const parsed = parseInboxItem(item({ text: 'Платежи\nБилет Onay. Оплата проезда' }), { rules: [onay], accounts, defaultAccountId: 'cash' });
+  assert.deepEqual(parsed.fields, {
+    type: 'expense', amount: 12000, currency: 'KZT', merchant: '', account_id: 'cash', account_rank: 0,
+    date: '2026-11-13T14:10:00', category_id: 'cat-transport', note: 'Автобус',
+  });
+  assert.equal(parseInboxItem(item({ text: 'Платежи. Оплата связи' }), { rules: [onay], accounts, defaultAccountId: 'cash' }).ok, false);
+});
+
+test('постоянная операция: нужны условие и сумма больше нуля, перевод нельзя', () => {
+  const base = { name: 'Onay', type: 'expense', match: 'Onay', fixed_amount: 12000 };
+  assert.deepEqual(validateRule(newParseRule({ ...base, match: '' }, 1)), ['Для постоянной операции нужно условие']);
+  assert.deepEqual(validateRule(newParseRule({ ...base, fixed_amount: 0 }, 1)), ['Нужно выражение для суммы']);
+  assert.deepEqual(validateRule(newParseRule({ ...base, type: 'transfer' }, 1)), ['Постоянная операция — только доход или расход']);
+  const withRegex = newParseRule({ ...base, amount: '([\\d\\s]+)\\s*₸' }, 1);
+  assert.equal(parseInboxItem(item({ text: 'Onay 150 ₸' }), { rules: [withRegex], accounts, defaultAccountId: 'cash' }).fields.amount, 15000,
+    'если в правиле есть выражение для суммы, сумма берётся из текста');
 });

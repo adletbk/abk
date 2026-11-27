@@ -1,6 +1,6 @@
 // Обработка входящих записей: операции, «Проверить», дедупликация, автокатегория.
 import { newTransaction } from './model.js';
-import { normalizeMerchant, parseInboxItem } from './parser.js';
+import { ACCOUNT_RANK, normalizeMerchant, parseInboxItem } from './parser.js';
 
 /** Окно, в котором Apple Pay и уведомление банка считаются одной покупкой. */
 export const DEDUP_WINDOW_MS = 5 * 60 * 1000;
@@ -72,6 +72,21 @@ export async function learnMerchant(db, merchant, categoryId, now = Date.now()) 
   });
 }
 
+// ---------- запомненные карты Apple Pay ----------
+
+/**
+ * Запоминает, к какому счёту относится карта из Apple Pay («Freedom Bank Kazakhstan» → «Deposit Card»).
+ * Вызывается, когда пользователь меняет счёт у операции Apple Pay вручную.
+ */
+export async function learnCard(db, card, accountId, now = Date.now()) {
+  const name = normalizeMerchant(card);
+  if (!name || !accountId) return;
+  await db.put('rules', {
+    id: `card:${name}`, kind: 'card', card: name, label: String(card).trim(), account_id: accountId,
+    deleted: false, deleted_at: null, updated_at: now,
+  });
+}
+
 // ---------- обработка ----------
 
 /** Сколько всего ждёт проверки: операции без данных и неразобранные записи. */
@@ -133,8 +148,16 @@ export async function processInbox(db, { now = Date.now(), retry = false } = {})
         inbox_ids: [...(duplicate.inbox_ids ?? []), item.id],
         merchant: duplicate.merchant || fields.merchant,
         note: duplicate.note || duplicate.merchant || fields.merchant,
+        card: duplicate.card || fields.card || undefined,
         updated_at: now,
       };
+      if (merged.card === undefined) delete merged.card;
+      // Счёт берётся у той записи, что определила его надёжнее: например, уведомление банка
+      // с последними цифрами карты точнее, чем название карты из Apple Pay.
+      if (fields.account_id && (fields.account_rank ?? 0) > (duplicate.account_rank ?? 0)) {
+        merged.account_id = fields.account_id;
+        merged.account_rank = fields.account_rank;
+      }
       if (!merged.category_id && merged.type !== 'transfer') {
         merged.category_id = categoryForMerchant(merged.merchant, rules);
         if (merged.category_id && merged.account_id) merged.status = 'ok';
@@ -146,12 +169,13 @@ export async function processInbox(db, { now = Date.now(), retry = false } = {})
       continue;
     }
 
-    const categoryId = fields.type === 'transfer' ? null : categoryForMerchant(fields.merchant, rules);
+    const categoryId = fields.type === 'transfer' ? null : fields.category_id ?? categoryForMerchant(fields.merchant, rules);
     // Перевод требует второго счёта, которого в уведомлении нет: всегда на проверку.
     const complete = Boolean(fields.account_id) && fields.type !== 'transfer' && Boolean(categoryId);
     const tx = newTransaction({
       date: fields.date, amount: fields.amount, currency: fields.currency, type: fields.type,
-      category_id: categoryId, account_id: fields.account_id, note: fields.merchant, merchant: fields.merchant,
+      category_id: categoryId, account_id: fields.account_id, note: fields.note || fields.merchant, merchant: fields.merchant,
+      account_rank: fields.account_rank ?? ACCOUNT_RANK.fallback, ...(fields.card ? { card: fields.card } : {}),
       source: item.source === 'sms' ? 'notification' : item.source,
       sources: [item.source], inbox_ids: [item.id], fingerprint,
       status: complete ? 'ok' : 'needs_review',

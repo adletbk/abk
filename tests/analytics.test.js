@@ -189,3 +189,34 @@ test('ringSegment: сектор кольца начинается сверху �
   assert.ok(big.area.includes('A100 100 0 1 1'), 'дуга больше половины круга помечается флагом large-arc');
   assert.ok(!big.area.includes('NaN'));
 });
+
+// ---------- ещё инсайты ----------
+const { smallPurchases, busiestWeekday, categoryGrowth } = await import('../js/analytics.js');
+const ins = (date, amount, category_id = 'food', extra = {}) => ({ id: date + amount + category_id, date: date + 'T12:00:00', amount, category_id, type: 'expense', currency: 'KZT', account_id: 'A', deleted: false, ...extra });
+
+test('мелкие траты: покупки до порога, доля от всех трат', () => {
+  const list = [ins('2026-11-02', 150000), ins('2026-11-03', 300000), ins('2026-11-04', 300100), ins('2026-11-05', 1250000), ins('2026-11-05', 50000, 'food', { type: 'income' })];
+  assert.deepEqual(smallPurchases(list, '2026-11', { today: '2026-11-20' }), { count: 2, amount: 450000, share: 22, limit: 300000 });
+  assert.deepEqual(smallPurchases([], '2026-11', { today: '2026-11-20' }), { count: 0, amount: 0, share: null, limit: 300000 });
+});
+
+test('самый затратный день недели: среднее на один такой день, нужно две недели', () => {
+  // 2026-11-02 — понедельник. Две пятницы по 100 (в среднем 100), понедельник 300 за два понедельника (в среднем 150).
+  const list = [ins('2026-11-06', 10000), ins('2026-11-13', 10000), ins('2026-11-02', 30000), ins('2026-11-20', 999999)];
+  assert.deepEqual(busiestWeekday(list, '2026-11', { today: '2026-11-14' }), { weekday: 1, name: 'понедельник', average: 15000 },
+    'понедельников прошло два (2 и 9), пятниц — две (6 и 13); будущая трата 20-го не считается');
+  assert.equal(busiestWeekday(list, '2026-11', { today: '2026-11-13' }), null, 'меньше двух недель');
+});
+
+test('рост категории: к прошлому месяцу на том же отрезке дней', () => {
+  const list = [
+    ins('2026-10-03', 10000, 'food'), ins('2026-10-04', 50000, 'home'), ins('2026-10-25', 90000, 'food'),
+    ins('2026-11-03', 40000, 'food'), ins('2026-11-04', 20000, 'home'), ins('2026-11-05', 5000, 'fun'),
+  ];
+  const growth = categoryGrowth(list, '2026-11', { today: '2026-11-10' });
+  assert.deepEqual(growth, { category_id: 'food', amount: 40000, previous: 10000, delta: 30000, percent: 300 },
+    'октябрьская трата 25-го не входит: сравниваются первые 10 дней');
+  assert.equal(categoryGrowth(list.slice(3), '2026-11', { today: '2026-11-10' }), null, 'в прошлом периоде данных нет');
+  const week = { kind: 'week', from: '2026-11-02', to: '2026-11-08' };
+  assert.equal(categoryGrowth([ins('2026-10-27', 100, 'food'), ins('2026-11-03', 500, 'food')], week, { today: '2026-11-08' }).delta, 400, 'неделя сравнивается с прошлой неделей');
+});

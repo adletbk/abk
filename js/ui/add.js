@@ -8,7 +8,8 @@ import {
 } from '../money.js';
 import { editCategory, promptSheet } from './editors.js';
 import { templateFromTransaction, fieldsFromTemplate, orderedCategories, templateGroups } from '../catalog.js';
-import { learnMerchant } from '../inbox.js';
+import { learnCard, learnMerchant } from '../inbox.js';
+import { ACCOUNT_RANK } from '../parser.js';
 import { eventDate } from '../parser.js';
 import { revealDay } from '../period.js';
 import { markPlanned } from '../planned.js';
@@ -293,7 +294,7 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
     // Правка делает тестовую операцию своей: снимаем пометку demo, чтобы её не стёрла очистка.
     // Сохранение вручную означает, что операцию проверили.
     const tx = existing
-      ? { ...existing, ...fields, demo: false, status: 'ok', updated_at: Date.now() }
+      ? { ...existing, ...fields, demo: false, status: 'ok', account_rank: ACCOUNT_RANK.manual, updated_at: Date.now() }
       : newTransaction(inboxItem ? {
         ...fields, source: inboxItem.source === 'sms' ? 'notification' : inboxItem.source,
         sources: [inboxItem.source], inbox_ids: [inboxItem.id], fingerprint: `inbox:${inboxItem.id}`,
@@ -311,6 +312,8 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
       await db.setSetting('last_account_id', tx.account_id);
       // Запоминаем категорию получателя: следующая такая операция получит её сама.
       if (existing?.merchant && tx.category_id) await learnMerchant(db, existing.merchant, tx.category_id);
+      // Счёт у операции Apple Pay исправили: в следующий раз эта карта сразу попадёт на нужный счёт.
+      if (existing?.card && tx.account_id !== existing.account_id) await learnCard(db, existing.card, tx.account_id);
       if (plan && !plan.deleted && /^\d{4}-\d{2}-\d{2}$/.test(planDay)) {
         // Свежая копия: платёж могли изменить, пока был открыт этот экран.
         const fresh = await db.get('planned', plan.id) ?? plan;
