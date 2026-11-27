@@ -16,6 +16,7 @@ import { renderImport } from './ui/import.js';
 import { renderInsights, renderDay } from './ui/insights.js';
 import { renderPlanned } from './ui/planned.js';
 import { renderCategory } from './ui/category.js';
+import { tabBar, tabOf } from './ui/tabs.js';
 
 const SCREENS = {
   analytics: renderAnalytics,
@@ -56,6 +57,8 @@ async function main() {
     db,
     state,
     navigate(hash) { depth++; location.hash = hash; },
+    /** Переход на вкладку: без записи в истории, «Назад» с вкладки не ведёт на другую вкладку. */
+    tab(hash) { depth = 0; location.replace(hash); },
     /** Назад на главную без лишних записей в истории. */
     back() {
       if (depth > 0) { depth--; history.back(); } else { location.replace('#/'); }
@@ -80,7 +83,12 @@ async function main() {
       else if (category) await renderCategory(target, ctx, category[1]);
       else if (screen) await screen(target, ctx);
       else await renderHome(target, ctx);
+      // Вкладки — только на экранах верхнего уровня; на внутренних экранах есть «Назад».
+      const tab = add || day || category ? null : tabOf(location.hash);
+      const syncError = tab ? await db.getSetting('sync_error', null) : null;
       if (seq !== renderSeq) return; // пришёл более новый рендер
+      if (tab) target.append(tabBar(ctx, tab, { alert: syncError ? 'ошибка синхронизации' : null }));
+      document.body.classList.toggle('with-tabs', Boolean(tab));
       clear(root).append(...target.childNodes);
       if (auto) scheduleSync(ctx); // после любого изменения экраны перерисовываются
     },

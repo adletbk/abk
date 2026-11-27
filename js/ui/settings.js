@@ -26,12 +26,7 @@ export async function renderSettings(root, ctx) {
     : syncAt ? `Последняя: ${new Date(syncAt).toLocaleString('ru-RU')}` : 'Подключена';
 
   clear(root).append(h('div', { class: 'screen' },
-    screenHeader(ctx, 'Настройки'),
-    h('div', { class: 'list' },
-      listItem({
-        iconName: 'lu-calendar', color: '#F472B6', label: 'Календарь платежей', sub: 'Подписки, аренда, кредиты по датам',
-        onClick: () => ctx.navigate('#/planned'),
-      })),
+    screenHeader(ctx, 'Настройки', null, { back: false }),
     h('div', { class: 'group-title', text: 'Данные' }),
     h('div', { class: 'list' },
       listItem({ iconName: 'wallet', color: '#10B981', label: 'Счета', onClick: () => ctx.navigate('#/accounts') }),

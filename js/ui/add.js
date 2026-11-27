@@ -1,13 +1,13 @@
 // Добавление и правка операции.
 import { h, clear, toast } from './dom.js';
 import { icon } from '../icons.js';
-import { pickSheet, confirmSheet } from './sheet.js';
+import { openSheet, pickSheet, confirmSheet } from './sheet.js';
 import { createKeypad } from './keypad.js';
 import {
-  CURRENCIES, amountToText, currencySymbol, formatKeypadText, keypadReduce, parseAmount,
+  CURRENCIES, amountToText, currencySymbol, formatKeypadText, formatMoney, keypadReduce, parseAmount,
 } from '../money.js';
 import { editCategory, promptSheet } from './editors.js';
-import { templateFromTransaction, fieldsFromTemplate, orderedCategories } from '../catalog.js';
+import { templateFromTransaction, fieldsFromTemplate, orderedCategories, templateGroups } from '../catalog.js';
 import { learnMerchant } from '../inbox.js';
 import { eventDate } from '../parser.js';
 import { revealDay } from '../period.js';
@@ -61,8 +61,10 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
     note: '',
     categoryId: null,
   };
-  if (template && !template.deleted) {
-    const t = fieldsFromTemplate(template);
+  // Шаблон только заполняет форму: записывает операцию по-прежнему кнопка «Сохранить».
+  let templateUsed = null;
+  function applyTemplate(chosen) {
+    const t = fieldsFromTemplate(chosen);
     const usable = (accountId) => (accounts.some((a) => a.id === accountId) ? accountId : null);
     Object.assign(form, {
       type: t.type,
@@ -73,7 +75,9 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
       note: t.note ?? '',
       categoryId: categories.some((c) => c.id === t.category_id) ? t.category_id : null,
     });
+    templateUsed = chosen.id;
   }
+  if (template && !template.deleted) applyTemplate(template);
 
   if (plan && !plan.deleted) {
     const accountId = accounts.some((a) => a.id === plan.account_id) ? plan.account_id : form.accountId;
@@ -147,6 +151,10 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
         type: 'button', class: 'chip chip-currency', 'aria-label': `Валюта: ${form.currency}`, onClick: pickCurrency,
         text: currencySymbol(form.currency),
       }),
+      !existing && h('button', {
+        type: 'button', class: 'chip chip-icon' + (templateUsed ? ' on' : ''), onClick: pickTemplate,
+        'aria-label': templateUsed ? 'Шаблоны: шаблон применён' : 'Шаблоны',
+      }, icon('bolt', 20)),
     ].filter(Boolean));
   }
   async function pickAccount() {
@@ -161,6 +169,61 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
     const picked = await pickSheet({ title: 'Куда перевести', selected: form.toAccountId, items: accountItems(form.accountId) });
     if (picked) { form.toAccountId = picked.value; paintChips(); }
   }
+  /** Список шаблонов: частые сверху, остальные по алфавиту, поиск при длинном списке. */
+  async function pickTemplate() {
+    const [templates, usage] = await Promise.all([db.getAll('templates'), db.getSetting('template_usage', {})]);
+    const live = templates.filter((t) => !t.deleted);
+    const body = h('div', {});
+    const search = live.length > 8 && h('input', {
+      class: 'field-input sheet-search', type: 'search', placeholder: 'Найти шаблон', autocomplete: 'off',
+      enterkeyhint: 'search', 'aria-label': 'Найти шаблон', onInput: () => paintList(),
+    });
+    const item = (t) => {
+      const category = categoriesById.get(t.category_id);
+      const transfer = t.type === 'transfer';
+      return h('button', { type: 'button', class: 'sheet-item', onClick: () => choose(t) },
+        h('span', { class: 'cat-badge', style: { '--c': transfer ? '#4C8DFF' : category?.color ?? '#A3A3A3' } },
+          icon(transfer ? 'transfer' : category?.icon ?? 'bolt', 22)),
+        h('span', { class: 'label', text: t.name }),
+        h('span', { class: 'right', text: t.amount ? formatMoney(t.amount, t.currency) : 'без суммы' }),
+        h('span', { class: 'check' }, t.id === templateUsed ? icon('check') : null));
+    };
+    const group = (title) => h('div', { class: 'sheet-group', text: title });
+    function paintList() {
+      const { frequent, all } = templateGroups(live, usage, { query: search ? search.value : '' });
+      clear(body).append(...[
+        frequent.length > 0 && group('Часто'), ...frequent.map(item),
+        frequent.length > 0 && all.length > 0 && group('Все'), ...all.map(item),
+        live.length === 0 && h('p', { class: 'sheet-text', text: 'Шаблонов пока нет. Заполните операцию и выберите в меню «⋯» «Сохранить как шаблон».' }),
+        live.length > 0 && frequent.length + all.length === 0 && h('p', { class: 'sheet-text', text: 'Ничего не найдено' }),
+      ].filter(Boolean));
+    }
+    function choose(t) {
+      applyTemplate(t);
+      close();
+      repaint();
+    }
+    paintList();
+    const close = openSheet({
+      title: 'Шаблоны', tall: live.length > 8,
+      content: h('div', {}, search, body,
+        templateUsed && h('button', {
+          type: 'button', class: 'sheet-item', onClick: () => {
+            Object.assign(form, { text: '', note: '', categoryId: null });
+            templateUsed = null;
+            close();
+            repaint();
+          },
+        }, h('span', { class: 'cat-badge', style: { '--c': '#A3A3A3' } }, icon('close', 22)), h('span', { class: 'label', text: 'Очистить поля' })),
+        h('button', { type: 'button', class: 'sheet-item', onClick: () => { close(); ctx.navigate('#/templates'); } },
+          h('span', { class: 'cat-badge', style: { '--c': '#A3A3A3' } }, icon('settings', 22)), h('span', { class: 'label', text: 'Изменить шаблоны' }))),
+    });
+  }
+  function repaint() {
+    note.value = form.note;
+    paintSeg(); paintAmount(); paintChips(); paintCats({ reveal: true });
+  }
+
   async function pickCurrency() {
     const picked = await pickSheet({
       title: 'Валюта', selected: form.currency,
@@ -240,6 +303,11 @@ export async function renderAdd(root, ctx, { id = null, templateId = null, inbox
     saving = true;
     try {
       await db.put('transactions', tx);
+      if (templateUsed && !existing) {
+        // Счётчик выборов: частые шаблоны показываются в списке первыми. Хранится только на устройстве.
+        const usage = await db.getSetting('template_usage', {});
+        await db.setSetting('template_usage', { ...usage, [templateUsed]: (usage[templateUsed] ?? 0) + 1 });
+      }
       await db.setSetting('last_account_id', tx.account_id);
       // Запоминаем категорию получателя: следующая такая операция получит её сама.
       if (existing?.merchant && tx.category_id) await learnMerchant(db, existing.merchant, tx.category_id);

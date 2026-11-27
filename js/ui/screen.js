@@ -2,9 +2,10 @@
 import { h } from './dom.js';
 import { icon } from '../icons.js';
 
-export function screenHeader(ctx, title, right = null) {
+/** back: false — экран-вкладка, кнопки «Назад» нет. */
+export function screenHeader(ctx, title, right = null, { back = true } = {}) {
   return h('header', { class: 'screen-head' },
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Назад', onClick: () => ctx.back() }, icon('chevron-left')),
+    back ? h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Назад', onClick: () => ctx.back() }, icon('chevron-left')) : h('span', { class: 'head-spacer' }),
     h('h1', { text: title }),
     right ?? h('span', { class: 'head-spacer' }));
 }

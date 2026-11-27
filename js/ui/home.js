@@ -1,23 +1,19 @@
-// Главная: остаток, баланс месяца, операции по дням, нижняя панель.
-import { h, clear, toast } from './dom.js';
+// Главная: остаток, баланс месяца, операции по дням, кнопка «+».
+import { h, clear } from './dom.js';
 import { icon } from '../icons.js';
-import { pickSheet, confirmSheet } from './sheet.js';
+import { confirmSheet } from './sheet.js';
 import { accountChip, txRow } from './txrow.js';
 import { formatAmount, formatMoney } from '../money.js';
 import { dayTitle, todayKey } from '../model.js';
 import { currentPeriod, periodControl } from './period.js';
 import { monthSummary, groupByDay, excludedAccountIds } from '../selectors.js';
 import { clearDemo } from '../seed.js';
-import { runSync } from './sync.js';
 import { reviewCounts } from '../inbox.js';
-
-const TRANSFER_COLOR = '#4C8DFF';
 
 export async function renderHome(root, ctx) {
   const { db, state } = ctx;
-  const [txs, categories, allAccounts, demo, syncError] = await Promise.all([
+  const [txs, categories, allAccounts, demo] = await Promise.all([
     db.getAll('transactions'), db.getAll('categories'), db.getAll('accounts'), db.getSetting('demo', false),
-    db.getSetting('sync_error', null),
   ]);
   const review = await reviewCounts(db);
   const today = todayKey();
@@ -34,9 +30,9 @@ export async function renderHome(root, ctx) {
   const topbar = h('header', { class: 'topbar' },
     accountChip(ctx, { accounts, allAccounts, txs }),
     h('span', { class: 'spacer' }),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Поиск', onClick: toggleSearch }, icon('search')),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Аналитика', onClick: () => ctx.navigate('#/analytics') }, icon('pie')),
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Настройки', onClick: () => ctx.navigate('#/settings') }, icon('settings')));
+    // Синхронизация идёт сама; значок виден, только пока она выполняется.
+    h('span', { class: 'sync-indicator', role: 'status', 'aria-label': 'Идёт синхронизация' }, icon('sync', 18)),
+    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Поиск', onClick: toggleSearch }, icon('search')));
 
   // --- поиск ---
   const searchInput = h('input', {
@@ -67,27 +63,6 @@ export async function renderHome(root, ctx) {
         icon('arrow-out', 18), h('span', { text: formatAmount(summary.expense) }))),
     h('button', { type: 'button', class: 'pill-btn', onClick: () => ctx.navigate('#/insights') },
       icon('sparkles', 20), 'Инсайты'));
-
-  async function pickTemplate() {
-    const templates = (await db.getAll('templates')).filter((t) => !t.deleted).sort((a, b) => a.updated_at - b.updated_at);
-    if (templates.length === 0) {
-      toast('Шаблонов пока нет. Создайте его из меню «⋮» на экране операции', { duration: 4500 });
-      return;
-    }
-    const picked = await pickSheet({
-      title: 'Шаблоны',
-      items: templates.map((t) => {
-        const category = categoriesById.get(t.category_id);
-        return {
-          value: t.id, label: t.name,
-          icon: t.type === 'transfer' ? 'transfer' : category?.icon ?? 'bolt',
-          color: t.type === 'transfer' ? TRANSFER_COLOR : category?.color ?? '#FFD60A',
-          right: t.amount ? formatMoney(t.amount, t.currency) : null,
-        };
-      }),
-    });
-    if (picked) ctx.navigate(`#/add?t=${picked.value}`);
-  }
 
   // --- тестовые данные ---
   const banner = demo && h('div', { class: 'banner' },
@@ -139,15 +114,7 @@ export async function renderHome(root, ctx) {
   }
   fillList();
 
-  // --- нижняя панель ---
-  const dock = h('nav', { class: 'dock', 'aria-label': 'Действия' },
-    h('button', { type: 'button', 'aria-label': 'Шаблоны', onClick: pickTemplate }, icon('bolt')),
-    h('button', { type: 'button', class: 'dock-add', 'aria-label': 'Добавить операцию', onClick: () => ctx.navigate('#/add') }, icon('plus', 28)),
-    h('button', {
-      type: 'button', class: 'dock-sync' + (syncError ? ' failed' : ''),
-      'aria-label': syncError ? `Синхронизация: ошибка. ${syncError.message}` : 'Синхронизация',
-      onClick: () => runSync(ctx),
-    }, icon('sync')));
+  const add = h('button', { type: 'button', class: 'fab', 'aria-label': 'Добавить операцию', onClick: () => ctx.navigate('#/add') }, icon('plus', 28));
 
-  clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, reviewBanner, list, dock));
+  clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, reviewBanner, list, add));
 }

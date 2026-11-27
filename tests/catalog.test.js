@@ -135,3 +135,27 @@ test('validParents: только категории верхнего уровн�
   assert.deepEqual(validParents({ id: 'new', type: 'income' }, cats).map((c) => c.id), ['salary']);
   assert.deepEqual(validParents(byId.get('food'), cats), []);
 });
+
+test('шаблоны: частые сверху, остальные по алфавиту, поиск', async () => {
+  const { templateGroups } = await import('../js/catalog.js');
+  const t = (id, name, note = '') => ({ id, name, note, deleted: false });
+  const list = [t('a', 'Обед'), t('b', 'Автобус'), t('c', 'Кофе', 'с собой'), t('d', 'Интернет'), t('e', 'Аренда'), t('f', 'Спортзал'), { ...t('x', 'Удалён'), deleted: true }];
+  const usage = { c: 7, a: 3, f: 3, x: 99 };
+  const groups = templateGroups(list, usage, { limit: 2 });
+  assert.deepEqual(groups.frequent.map((x) => x.id), ['c', 'a'], 'по числу выборов, при равенстве по алфавиту');
+  assert.deepEqual(groups.all.map((x) => x.name), ['Автобус', 'Аренда', 'Интернет', 'Спортзал']);
+  assert.deepEqual(templateGroups(list.slice(0, 3), usage).frequent, [], 'короткий список не делится');
+  assert.deepEqual(templateGroups(list.slice(0, 3), usage).all.map((x) => x.name), ['Автобус', 'Кофе', 'Обед']);
+  assert.deepEqual(templateGroups(list, usage, { query: 'СОБОЙ' }), { frequent: [], all: [list[2]] }, 'поиск и по заметке');
+  assert.deepEqual(templateGroups(list, {}, { limit: 2 }).frequent, [], 'без истории частых нет');
+});
+
+test('вкладки: адреса разделов и внутренние экраны', async () => {
+  const { tabOf } = await import('../js/ui/tabs.js');
+  assert.equal(tabOf('').label, 'Операции');
+  assert.equal(tabOf('#/').label, 'Операции');
+  assert.equal(tabOf('#/analytics').label, 'Аналитика');
+  assert.equal(tabOf('#/planned').label, 'Календарь');
+  assert.equal(tabOf('#/settings').label, 'Настройки');
+  for (const hash of ['#/add', '#/accounts', '#/category/x', '#/insights', '#/sync']) assert.equal(tabOf(hash), null, hash);
+});

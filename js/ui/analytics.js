@@ -57,7 +57,6 @@ export async function renderAnalytics(root, ctx) {
   }
 
   const top = h('header', { class: 'topbar' },
-    h('button', { type: 'button', class: 'icon-btn', 'aria-label': 'Закрыть', onClick: () => ctx.back() }, icon('close')),
     accountChip(ctx, { accounts, allAccounts, txs }),
     h('span', { class: 'spacer' }),
     h('button', { type: 'button', class: 'icon-btn', 'aria-label': `Вид отчёта: ${VIEWS[state.chartType].label}`, onClick: pickView },

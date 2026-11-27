@@ -67,6 +67,24 @@ export function templateFromTransaction(fields, name, now = Date.now()) {
   };
 }
 
+/**
+ * Шаблоны для списка выбора. usage — сколько раз шаблон выбирали: { id: число }.
+ * frequent — до limit самых частых (только если шаблонов больше limit), all — остальные по алфавиту.
+ * С запросом query — одна группа совпадений по названию и заметке.
+ */
+export function templateGroups(templates, usage = {}, { limit = 5, query = '' } = {}) {
+  const live = templates.filter((t) => !t.deleted);
+  const byName = (a, b) => a.name.localeCompare(b.name, 'ru');
+  const needle = query.trim().toLowerCase();
+  if (needle) {
+    return { frequent: [], all: live.filter((t) => `${t.name}\n${t.note ?? ''}`.toLowerCase().includes(needle)).sort(byName) };
+  }
+  if (live.length <= limit) return { frequent: [], all: [...live].sort(byName) };
+  const count = (t) => usage[t.id] ?? 0;
+  const frequent = live.filter((t) => count(t) > 0).sort((a, b) => count(b) - count(a) || byName(a, b)).slice(0, limit);
+  return { frequent, all: live.filter((t) => !frequent.includes(t)).sort(byName) };
+}
+
 /** Поля операции из шаблона (без даты: она ставится в момент ввода). */
 export function fieldsFromTemplate(template) {
   return pickFields(template);

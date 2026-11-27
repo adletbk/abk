@@ -170,7 +170,7 @@ export async function renderPlanned(root, ctx) {
   }
 
   clear(root).append(h('div', { class: 'screen screen-planned' },
-    screenHeader(ctx, 'Календарь платежей', addButton),
+    screenHeader(ctx, 'Календарь платежей', addButton, { back: false }),
     h('div', { class: 'plan-period' }, pill),
     summary,
     sum.unknown > 0 && h('p', { class: 'note-text', text: `«+ ?» — ${sum.unknown} ${plural(sum.unknown, ['платёж', 'платежа', 'платежей'])} без суммы: она вводится при оплате.` }),

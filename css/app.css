@@ -335,32 +335,6 @@ svg.icon { display: block; flex: none; }
 
 .empty { margin: 48px 0; text-align: center; color: var(--text-2); }
 
-.dock {
-  position: fixed;
-  left: 50%;
-  bottom: calc(var(--safe-bottom) + 12px);
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px;
-  border-radius: var(--r-pill);
-  background: var(--raised);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7);
-  z-index: 10;
-}
-.dock button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: var(--r-pill);
-  background: var(--card);
-  color: var(--text);
-}
-.dock .dock-add { width: 60px; height: 60px; background: var(--text); color: #000000; }
-
 /* ---------- Добавление операции ---------- */
 
 .screen-add {
@@ -759,23 +733,7 @@ svg.icon { display: block; flex: none; }
 
 /* ---------- Синхронизация ---------- */
 
-.dock-sync { position: relative; }
-.dock-sync.failed::after {
-  content: '';
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--red);
-  border: 2px solid var(--card);
-}
-.syncing .dock-sync svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) {
-  .syncing .dock-sync svg { animation: none; opacity: 0.5; }
-}
 .list .item-label { white-space: normal; overflow-wrap: break-word; }
 .list .item-main { min-width: 72px; }
 .item-tag, .item-right, .item-mark, .item-chevron { flex: none; }
@@ -1134,3 +1092,38 @@ svg.icon { display: block; flex: none; }
 .screen-category .day:first-child { margin-top: 4px; }
 .cat-month .item[aria-expanded="true"] .item-chevron { transform: rotate(90deg); }
 .cat-month-days { padding: 8px 0 8px; }
+
+/* ---------- Вкладки и кнопка «+» ---------- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+  display: flex; justify-content: space-around;
+  padding: 6px calc(var(--safe-right) + 4px) calc(var(--safe-bottom) + 4px) calc(var(--safe-left) + 4px);
+  border-top: 1px solid var(--raised);
+  background: rgba(10, 10, 10, 0.96);
+}
+.tab { flex: 1; max-width: 120px; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 48px; padding-top: 2px; color: var(--text-2); font-size: 11px; font-weight: 500; }
+.tab.on { color: var(--text); }
+.tab-icon { position: relative; display: inline-flex; }
+.tab-dot { position: absolute; top: -2px; right: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--red); border: 2px solid #0A0A0A; }
+.with-tabs .screen, .with-tabs .screen-home { padding-bottom: calc(var(--safe-bottom) + 96px); }
+.with-tabs .screen-home { padding-bottom: calc(var(--safe-bottom) + 164px); }
+.fab {
+  position: fixed; z-index: 11;
+  right: calc(var(--safe-right) + 16px); bottom: calc(var(--safe-bottom) + 74px);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 60px; height: 60px; border-radius: 50%;
+  background: var(--text); color: #000000; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.7);
+}
+.sync-indicator { display: none; align-items: center; justify-content: center; width: 32px; height: var(--tap); color: var(--text-2); }
+.syncing .sync-indicator { display: inline-flex; }
+.syncing .sync-indicator svg { animation: spin 1s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .syncing .sync-indicator svg { animation: none; } }
+
+/* Шаблоны в экране добавления */
+.screen-add .chip { padding: 0 12px; }
+.screen-add .chip-currency { padding: 0 12px; }
+.chip-icon { justify-content: center; width: var(--tap); padding: 0; }
+.screen-add .chip-icon { padding: 0; }
+.chip-icon.on { background: var(--text); color: #000000; }
+.sheet-search { margin-bottom: 8px; }
+.sheet-group { margin: 10px 4px 2px; color: var(--text-2); font-size: 13px; font-weight: 500; }
