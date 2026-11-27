@@ -201,7 +201,7 @@ export function renderStacked(series, colorOf) {
 export function renderSankey(left, right, formatValue) {
   const total = right.reduce((sum, node) => sum + node.amount, 0);
   if (total <= 0) return h('p', { class: 'empty', text: 'За этот период нет данных' });
-  const GAP = 5, BAR = 8, X1 = 0, X2 = 128, MIN = 11; // MIN: подписи соседних узлов не должны наезжать друг на друга
+  const GAP = 5, BAR = 8, X1 = 0, X2 = 128, MIN = 13; // MIN: подписи соседних узлов не должны наезжать друг на друга
   const base = Math.max(180, right.length * 22) / total;
   const heights = right.map((node) => Math.max(node.amount * base, MIN));
   const H = heights.reduce((sum, value) => sum + value, 0) + GAP * (right.length - 1);
@@ -244,7 +244,7 @@ export function renderSankey(left, right, formatValue) {
   for (const box of sources) root.append(node(X1, box));
   for (const box of targets) {
     root.append(node(X2, box));
-    const textY = num(box.y + Math.min(box.h / 2, 9) + 3.5);
+    const textY = num(box.y + Math.min(box.h / 2, 9) + 4.5);
     const name = svg('text', { class: 'sankey-name', x: X2 + BAR + 6, y: textY });
     name.textContent = box.label.length > 13 ? `${box.label.slice(0, 12)}…` : box.label;
     const value = svg('text', { class: 'sankey-value', x: 300, y: textY, 'text-anchor': 'end' });
