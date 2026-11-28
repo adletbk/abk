@@ -1,4 +1,4 @@
-// Главная: остаток, баланс месяца, операции по дням, кнопка «+».
+// Главная: остаток, баланс месяца, операции по дням. Кнопка «+» — рядом с вкладками (tabs.js).
 import { h, clear } from './dom.js';
 import { icon } from '../icons.js';
 import { confirmSheet } from './sheet.js';
@@ -114,7 +114,5 @@ export async function renderHome(root, ctx) {
   }
   fillList();
 
-  const add = h('button', { type: 'button', class: 'fab', 'aria-label': 'Добавить операцию', onClick: () => ctx.navigate('#/add') }, icon('plus', 28));
-
-  clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, reviewBanner, list, add));
+  clear(root).append(h('div', { class: 'screen-home' }, topbar, search, hero, banner, reviewBanner, list));
 }

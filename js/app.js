@@ -87,7 +87,7 @@ async function main() {
       const tab = add || day || category ? null : tabOf(location.hash);
       const syncError = tab ? await db.getSetting('sync_error', null) : null;
       if (seq !== renderSeq) return; // пришёл более новый рендер
-      if (tab) target.append(tabBar(ctx, tab, { alert: syncError ? 'ошибка синхронизации' : null }));
+      if (tab) target.append(...tabBar(ctx, tab, { alert: syncError ? 'ошибка синхронизации' : null }));
       document.body.classList.toggle('with-tabs', Boolean(tab));
       clear(root).append(...target.childNodes);
       if (auto) scheduleSync(ctx); // после любого изменения экраны перерисовываются
